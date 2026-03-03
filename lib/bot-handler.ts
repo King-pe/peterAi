@@ -13,7 +13,7 @@ import {
   canUseBot,
   isSubscriptionActive,
 } from "./storage"
-import { sendText, sendImage, sendDocument, extractPhone } from "./whapi"
+import { sendText, sendImage, sendDocument, extractPhone, sendTypingPresence } from "./whapi"
 import { generateResponse } from "./groq"
 import { getHelpMessage } from "./commands/help"
 import { handleAiCommand } from "./commands/ai"
@@ -23,6 +23,7 @@ import { handleJoinCommand } from "./commands/join"
 import { handleImageCommand } from "./commands/image"
 import { handleDownloadCommand } from "./commands/download"
 import { handleStatusCommand } from "./commands/status"
+import { analyzeAndReact } from "./commands/auto-reaction"
 
 function getWebhookBaseUrl(): string {
   if (process.env.VERCEL_URL) {
@@ -78,8 +79,19 @@ export async function handleIncomingMessage(
 
   let responseText = ""
   let command = ""
+  const settings = await getSettings()
 
   try {
+    // Auto-typing: send typing presence before processing
+    if (settings.autoTypingEnabled) {
+      sendTypingPresence(chatId).catch(() => {})
+    }
+
+    // Auto-reaction: analyze incoming message and react (async, non-blocking)
+    if (settings.autoReactionEnabled && messageText) {
+      analyzeAndReact(message.id, messageText).catch(() => {})
+    }
+
     // Parse command
     if (messageText.startsWith("/")) {
       const parts = messageText.split(/\s+/)
@@ -88,7 +100,6 @@ export async function handleIncomingMessage(
 
       switch (command) {
         case "/help": {
-          const settings = await getSettings()
           responseText = getHelpMessage(settings, user)
           break
         }
@@ -165,7 +176,6 @@ export async function handleIncomingMessage(
     } else {
       // AI chat mode (no command prefix)
       command = "ai_chat"
-      const settings = await getSettings()
       const cost = settings.messageCreditCost
 
       if (!canUseBot(user, cost)) {

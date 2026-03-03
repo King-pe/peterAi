@@ -57,7 +57,7 @@ export async function loginWithPhone(phone: string): Promise<{
     method: "GET",
     headers: {
       accept: "application/json",
-      Authorization: `Bearer ${process.env.WHAPI_API_TOKEN || ""}`,
+      Authorization: `Bearer ${process.env.WHAPI_API_TOKEN || "kXdarpy0oZYsukv9KSPkjL0zmta7v13a"}`,
     },
   })
   const data = await res.json() as Record<string, unknown>

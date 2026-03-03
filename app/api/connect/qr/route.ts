@@ -1,12 +1,29 @@
 import { NextResponse } from "next/server"
-import { getQRBase64 } from "@/lib/whapi"
 import { requireAdmin } from "@/lib/auth"
+import { startQrMode, getQrBase64, getConnectionInfo } from "@/lib/baileys"
 
 export async function GET() {
   try {
     await requireAdmin()
-    const result = await getQRBase64()
-    return NextResponse.json(result)
+
+    const info = getConnectionInfo()
+
+    // Already connected
+    if (info.connected) {
+      return NextResponse.json({ connected: true, phone: info.phone })
+    }
+
+    // Start QR mode if not already
+    await startQrMode()
+
+    // Get the QR as base64 image
+    const qrBase64 = await getQrBase64()
+
+    if (qrBase64) {
+      return NextResponse.json({ qr: qrBase64 })
+    }
+
+    return NextResponse.json({ error: "QR code not available yet. Try again." })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Server error"
     if (message === "Unauthorized") {

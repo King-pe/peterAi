@@ -1,5 +1,6 @@
 // ============================================
 // PeterAi - Type Definitions
+// Powered by Peter Joram
 // ============================================
 
 export interface User {
@@ -47,74 +48,50 @@ export interface BotSettings {
   botName: string
   welcomeMessage: string
   aiSystemPrompt: string
-  creditPrice: number        // TZS per credit pack (e.g., 1000 TZS = 50 credits)
-  creditsPerPack: number     // Number of credits in one pack
-  subscriptionPrice: number  // TZS per month
-  messageCreditCost: number  // Credits per AI message
-  imageCreditCost: number    // Credits per image generation
+  creditPrice: number
+  creditsPerPack: number
+  subscriptionPrice: number
+  messageCreditCost: number
+  imageCreditCost: number
   premiumGroupId: string
   botPhoneNumber: string
   currency: string
   maxMessageLength: number
   aiModel: string
-  whapiToken: string         // Whapi channel token (from QR login or env)
-  whapiConnected: boolean    // Whether WhatsApp device is linked
-  whapiPhone: string         // Connected WhatsApp phone number
-  autoTypingEnabled: boolean // Show "typing..." before responding
-  autoReactionEnabled: boolean // React with contextual emoji to incoming messages
+  whatsappConnected: boolean
+  whatsappPhone: string
+  autoTypingEnabled: boolean
+  autoReactionEnabled: boolean
 }
 
-// Whapi Types
-export interface WhapiWebhookPayload {
-  messages?: WhapiMessage[]
-  event?: {
-    type: string
-    description: string
-  }
-}
-
-export interface WhapiMessage {
+// Baileys Message Types (simplified for bot handler)
+export interface BaileysMessage {
   id: string
-  type: string
-  subtype: string
-  chat_id: string
+  chatId: string
   from: string
-  from_name: string
-  to: string
-  timestamp: number
-  text?: {
-    body: string
-  }
+  fromName: string
+  fromMe: boolean
+  text?: string
   image?: {
-    id: string
-    mime_type: string
     caption?: string
-    link?: string
+    url?: string
   }
   video?: {
-    id: string
-    mime_type: string
     caption?: string
-    link?: string
+    url?: string
   }
   audio?: {
-    id: string
-    mime_type: string
-    link?: string
+    url?: string
   }
   document?: {
-    id: string
-    mime_type: string
     filename?: string
-    link?: string
+    url?: string
   }
-  context?: {
+  quotedMessage?: {
     id: string
-    from: string
-    body?: string
+    text?: string
   }
-  from_me: boolean
-  source: string
+  timestamp: number
 }
 
 // PeterPay Types

@@ -1,12 +1,10 @@
 // ============================================
 // PeterAi - Smart Auto-Reaction System
+// Powered by Peter Joram
 // ============================================
-// Analyzes incoming message content via Groq AI
-// and reacts with a contextually appropriate emoji.
-// Includes a randomness factor so it doesn't react to every message.
 
 import { generateResponse } from "../groq"
-import { reactToMessage } from "../whapi"
+import { reactToMessage } from "../baileys"
 
 const REACTION_MAP: Record<string, string[]> = {
   funny: ["😂", "🤣", "😆"],
@@ -19,7 +17,7 @@ const REACTION_MAP: Record<string, string[]> = {
   neutral: [],
 }
 
-const REACT_PROBABILITY = 0.6 // 60% chance to react
+const REACT_PROBABILITY = 0.6
 
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
@@ -27,12 +25,10 @@ function pickRandom<T>(arr: T[]): T {
 
 export async function analyzeAndReact(
   messageId: string,
-  messageText: string
+  messageText: string,
+  chatId: string
 ): Promise<void> {
-  // Randomness gate: skip ~40% of messages
   if (Math.random() > REACT_PROBABILITY) return
-
-  // Skip very short messages or commands
   if (!messageText || messageText.length < 3 || messageText.startsWith("/")) return
 
   try {
@@ -45,15 +41,12 @@ export async function analyzeAndReact(
     const category = classification.trim().toLowerCase().replace(/[^a-z]/g, "")
     const emojis = REACTION_MAP[category] || REACTION_MAP.neutral
 
-    if (emojis.length === 0) return // Don't react to neutral messages
-
-    // For questions, only react 30% of the time
+    if (emojis.length === 0) return
     if (category === "question" && Math.random() > 0.3) return
 
     const emoji = pickRandom(emojis)
-    await reactToMessage(messageId, emoji)
+    await reactToMessage(chatId, messageId, emoji)
   } catch (err) {
-    // Silently fail - reactions are non-critical
     console.error("Auto-reaction error:", err)
   }
 }

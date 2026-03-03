@@ -1,8 +1,10 @@
 // ============================================
 // PeterAi - Main Bot Handler / Dispatcher
+// Uses @whiskeysockets/baileys
+// Powered by Peter Joram
 // ============================================
 
-import type { WhapiMessage } from "./types"
+import type { BaileysMessage } from "./types"
 import {
   getUser,
   saveUser,
@@ -13,7 +15,7 @@ import {
   canUseBot,
   isSubscriptionActive,
 } from "./storage"
-import { sendText, sendImage, sendDocument, extractPhone, sendTypingPresence } from "./whapi"
+import { sendText, sendImage, sendDocument, extractPhone, sendTypingPresence } from "./baileys"
 import { generateResponse } from "./groq"
 import { getHelpMessage } from "./commands/help"
 import { handleAiCommand } from "./commands/ai"
@@ -36,21 +38,21 @@ function getWebhookBaseUrl(): string {
 }
 
 export async function handleIncomingMessage(
-  message: WhapiMessage
+  message: BaileysMessage
 ): Promise<void> {
   // Skip outgoing messages
-  if (message.from_me) return
+  if (message.fromMe) return
 
-  // Skip group messages (optional: can be enabled later)
-  const chatId = message.chat_id
+  // Skip group messages
+  const chatId = message.chatId
   if (chatId.endsWith("@g.us")) return
 
   const phone = extractPhone(message.from)
-  const messageText = message.text?.body?.trim() || ""
-  const fromName = message.from_name || phone
+  const messageText = message.text?.trim() || ""
+  const fromName = message.fromName || phone
 
   if (!messageText && !message.image && !message.video && !message.audio) {
-    return // Skip empty messages
+    return
   }
 
   // Get or create user
@@ -59,7 +61,6 @@ export async function handleIncomingMessage(
     user = createNewUser(phone, fromName)
     await saveUser(user)
 
-    // Send welcome message
     const settings = await getSettings()
     await sendText(chatId, settings.welcomeMessage)
     await saveLog(
@@ -75,21 +76,21 @@ export async function handleIncomingMessage(
 
   // Update last active
   user.lastActive = new Date().toISOString()
-  user.name = fromName // Update name in case it changed
+  user.name = fromName
 
   let responseText = ""
   let command = ""
   const settings = await getSettings()
 
   try {
-    // Auto-typing: send typing presence before processing
+    // Auto-typing
     if (settings.autoTypingEnabled) {
       sendTypingPresence(chatId).catch(() => {})
     }
 
-    // Auto-reaction: analyze incoming message and react (async, non-blocking)
+    // Auto-reaction
     if (settings.autoReactionEnabled && messageText) {
-      analyzeAndReact(message.id, messageText).catch(() => {})
+      analyzeAndReact(message.id, messageText, chatId).catch(() => {})
     }
 
     // Parse command
@@ -136,14 +137,13 @@ export async function handleIncomingMessage(
           responseText = result.response
           user = result.user
 
-          // Send image if generated
           if (result.imageUrl) {
             await sendImage(chatId, result.imageUrl, responseText)
             await saveUser(user)
             await saveLog(
               createLogEntry(phone, fromName, command, messageText, "Image sent", "command")
             )
-            return // Already sent image with caption
+            return
           }
           break
         }
@@ -174,7 +174,7 @@ export async function handleIncomingMessage(
         }
       }
     } else {
-      // AI chat mode (no command prefix)
+      // AI chat mode
       command = "ai_chat"
       const cost = settings.messageCreditCost
 
@@ -200,7 +200,6 @@ export async function handleIncomingMessage(
 
     // Send response
     if (responseText) {
-      // Split long messages
       if (responseText.length > 4096) {
         const chunks = splitMessage(responseText, 4000)
         for (const chunk of chunks) {
@@ -242,7 +241,6 @@ export async function handleIncomingMessage(
         )
       )
     } catch {
-      // Final fallback - just log
       console.error("Failed to send error message")
     }
   }
@@ -258,10 +256,8 @@ function splitMessage(text: string, maxLength: number): string[] {
       break
     }
 
-    // Try to split at a newline
     let splitIndex = remaining.lastIndexOf("\n", maxLength)
     if (splitIndex === -1 || splitIndex < maxLength / 2) {
-      // Try to split at a space
       splitIndex = remaining.lastIndexOf(" ", maxLength)
     }
     if (splitIndex === -1 || splitIndex < maxLength / 2) {

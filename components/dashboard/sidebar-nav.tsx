@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 
 const navItems = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard/connect", label: "Connect", icon: Smartphone },
   { href: "/dashboard/users", label: "Users", icon: Users },
   { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
   { href: "/dashboard/logs", label: "Logs", icon: ScrollText },

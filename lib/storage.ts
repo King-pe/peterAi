@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS: BotSettings = {
   whapiToken: "",
   whapiConnected: false,
   whapiPhone: "",
+  autoTypingEnabled: true,
+  autoReactionEnabled: true,
 }
 
 async function ensureDataDir() {

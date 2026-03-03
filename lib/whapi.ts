@@ -173,6 +173,18 @@ export async function disconnectWhatsApp(): Promise<boolean> {
   }
 }
 
+// ---- Typing Presence ----
+
+export async function sendTypingPresence(chatId: string): Promise<void> {
+  try {
+    await whapiRequest(`/presences/${chatId}`, "PUT", {
+      type: "typing",
+    })
+  } catch (err) {
+    console.error("Failed to send typing presence:", err)
+  }
+}
+
 // ---- Send Messages ----
 
 export async function sendText(to: string, body: string) {

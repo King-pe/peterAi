@@ -1,12 +1,13 @@
 // ============================================
 // /status like|comment - React to WhatsApp status
+// Powered by Peter Joram
 // ============================================
 
-import { reactToMessage, sendText } from "../whapi"
-import type { WhapiMessage } from "../types"
+import { reactToMessage, sendText } from "../baileys"
+import type { BaileysMessage } from "../types"
 
 export async function handleStatusCommand(
-  message: WhapiMessage,
+  message: BaileysMessage,
   args: string
 ): Promise<{ response: string }> {
   const parts = args.trim().split(/\s+/)
@@ -18,8 +19,7 @@ export async function handleStatusCommand(
     }
   }
 
-  // Check if replying to a status
-  const contextId = message.context?.id
+  const contextId = message.quotedMessage?.id
 
   switch (action) {
     case "like": {
@@ -31,7 +31,7 @@ export async function handleStatusCommand(
       }
 
       try {
-        await reactToMessage(contextId, "\u2764\uFE0F") // Red heart emoji
+        await reactToMessage(message.chatId, contextId, "\u2764\uFE0F")
         return {
           response: "Umefanikiwa ku-like status!",
         }
@@ -60,11 +60,7 @@ export async function handleStatusCommand(
       }
 
       try {
-        // Reply to the status message
-        const statusFrom = message.context?.from
-        if (statusFrom) {
-          await sendText(statusFrom, commentText)
-        }
+        await sendText(message.from, commentText)
         return {
           response: "Comment yako imetumwa!",
         }

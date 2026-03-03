@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server"
-import { disconnectWhatsApp } from "@/lib/whapi"
 import { requireAdmin } from "@/lib/auth"
+import { disconnectWhatsApp } from "@/lib/baileys"
+import { saveSettings } from "@/lib/storage"
 
 export async function POST() {
   try {
     await requireAdmin()
     const success = await disconnectWhatsApp()
+
+    if (success) {
+      // Update settings to reflect disconnected state
+      await saveSettings({
+        whatsappConnected: false,
+        whatsappPhone: "",
+      })
+    }
+
     if (!success) {
       return NextResponse.json({ error: "Failed to disconnect" }, { status: 500 })
     }

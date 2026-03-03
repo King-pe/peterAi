@@ -1,8 +1,9 @@
 // ============================================
 // /join - Join premium WhatsApp group
+// Powered by Peter Joram
 // ============================================
 
-import { getGroupInviteLink, addParticipant } from "../whapi"
+import { getGroupInviteLink, addParticipant } from "../baileys"
 import { getSettings, isSubscriptionActive, canUseBot } from "../storage"
 import type { User } from "../types"
 
@@ -17,7 +18,6 @@ export async function handleJoinCommand(
     }
   }
 
-  // Check if user has active subscription or enough credits
   if (!isSubscriptionActive(user) && !canUseBot(user, 10)) {
     return {
       response: `Unahitaji subscription au angalau credits 10 ili kujiunga na premium group.\n\nSalio lako: ${user.credits} credits\n\nTumia /pay ${settings.subscriptionPrice} kwa subscription ya mwezi.`,
@@ -25,14 +25,12 @@ export async function handleJoinCommand(
   }
 
   try {
-    // Try to add participant directly
     try {
       await addParticipant(settings.premiumGroupId, [user.phone])
       return {
         response: "Umefanikiwa kuongezwa kwenye premium group! Angalia groups zako.",
       }
     } catch {
-      // If direct add fails, send invite link
       const link = await getGroupInviteLink(settings.premiumGroupId)
       if (link) {
         return {

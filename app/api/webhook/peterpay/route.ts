@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import type { PeterPayWebhookPayload } from "@/lib/types"
 import { getPayment, updatePayment, getUser, saveUser } from "@/lib/storage"
 import { saveLog, createLogEntry, getSettings } from "@/lib/storage"
-import { sendText, formatChatId } from "@/lib/whapi"
+import { sendText, formatChatId } from "@/lib/baileys"
 import { verifyWebhookSignature } from "@/lib/peterpay"
 
 export async function POST(request: Request) {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Bot, QrCode, Smartphone, Loader2, CheckCircle2, XCircle, ArrowRight, Zap, Shield, MessageSquare } from "lucide-react"
+import { Bot, QrCode, Smartphone, Loader2, CheckCircle2, ArrowRight, Zap, Shield, MessageSquare, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -21,11 +21,10 @@ export default function LandingPage() {
   const [phoneLoading, setPhoneLoading] = useState(false)
   const [phoneCode, setPhoneCode] = useState<string | null>(null)
 
-  // Check connection status
   const checkStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/connect/status")
-      if (res.status === 401) return // Not logged in
+      if (res.status === 401) return
       const data = await res.json()
       if (data.connected) {
         setConnectionStatus("connected")
@@ -55,11 +54,10 @@ export default function LandingPage() {
       } catch {
         // silently fail
       }
-    }, 5000)
+    }, 3000)
     return () => clearInterval(interval)
   }, [connectionStatus])
 
-  // Fetch QR code
   async function fetchQR() {
     setQrLoading(true)
     try {
@@ -70,6 +68,11 @@ export default function LandingPage() {
         return
       }
       const data = await res.json()
+      if (data.connected) {
+        setConnectionStatus("connected")
+        toast.success("Already connected!")
+        return
+      }
       if (data.qr) {
         setQrData(data.qr)
         setConnectionStatus("connecting")
@@ -90,15 +93,16 @@ export default function LandingPage() {
       fetchQR()
     }, 20000)
     return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionStatus, qrData])
 
-  // Login with phone number
   async function handlePhoneLogin() {
     if (!phoneNumber.trim()) {
       toast.error("Enter a phone number")
       return
     }
     setPhoneLoading(true)
+    setPhoneCode(null)
     try {
       const res = await fetch("/api/connect/phone", {
         method: "POST",
@@ -111,11 +115,12 @@ export default function LandingPage() {
         return
       }
       const data = await res.json()
-      if (data.token) {
-        setPhoneCode(data.token)
-        setConnectionStatus("connecting")
-        toast.success("Code generated! Enter it on your WhatsApp.")
-      } else if (data.code) {
+      if (data.connected) {
+        setConnectionStatus("connected")
+        toast.success("Already connected!")
+        return
+      }
+      if (data.code) {
         setPhoneCode(data.code)
         setConnectionStatus("connecting")
         toast.success("Code generated! Enter it on your WhatsApp.")
@@ -138,7 +143,7 @@ export default function LandingPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
               <Bot className="h-5 w-5 text-primary-foreground" />
             </div>
-            <span className="text-lg font-bold text-foreground">PeterAi</span>
+            <span className="text-lg font-bold text-foreground font-sans">PeterAi</span>
           </div>
           <Button variant="outline" size="sm" onClick={() => router.push("/login")}>
             Admin Login
@@ -152,19 +157,19 @@ export default function LandingPage() {
           <div className="mx-auto max-w-2xl text-center">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm font-medium text-primary">
               <Zap className="h-3.5 w-3.5" />
-              Powered by AI
+              Powered by Baileys
             </div>
-            <h1 className="text-balance text-4xl font-bold tracking-tight text-foreground md:text-5xl lg:text-6xl">
+            <h1 className="text-balance text-4xl font-bold tracking-tight text-foreground md:text-5xl lg:text-6xl font-sans">
               Connect Your WhatsApp Bot in Seconds
             </h1>
-            <p className="mt-6 text-pretty text-lg text-muted-foreground">
-              Link your WhatsApp number directly and let PeterAi handle conversations,
-              payments, auto-typing, and smart reactions automatically.
+            <p className="mt-6 text-pretty text-lg leading-relaxed text-muted-foreground">
+              Link your WhatsApp number directly using QR code or phone pairing code.
+              PeterAi handles conversations, payments, auto-typing, and smart reactions automatically.
             </p>
           </div>
 
           {/* Features */}
-          <div className="mx-auto mt-12 grid max-w-3xl gap-4 md:grid-cols-3">
+          <div className="mx-auto mt-12 grid max-w-4xl gap-4 sm:grid-cols-2 md:grid-cols-4">
             <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card p-6 text-center">
               <MessageSquare className="h-8 w-8 text-primary" />
               <h3 className="font-semibold text-card-foreground">Auto Typing</h3>
@@ -184,6 +189,13 @@ export default function LandingPage() {
               <h3 className="font-semibold text-card-foreground">Secure</h3>
               <p className="text-sm text-muted-foreground">
                 End-to-end encrypted connections
+              </p>
+            </div>
+            <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card p-6 text-center">
+              <Lock className="h-8 w-8 text-primary" />
+              <h3 className="font-semibold text-card-foreground">Database</h3>
+              <p className="text-sm text-muted-foreground">
+                PostgreSQL powered data persistence
               </p>
             </div>
           </div>
@@ -208,7 +220,7 @@ export default function LandingPage() {
             <CardHeader className="text-center">
               <CardTitle className="text-foreground">Connect WhatsApp</CardTitle>
               <CardDescription>
-                Choose QR code scan or phone number to link your device.
+                Choose QR code scan or phone pairing code to link your device.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -263,7 +275,7 @@ export default function LandingPage() {
                       )}
                     </Button>
                     <p className="text-center text-xs text-muted-foreground">
-                      Open WhatsApp on your phone, go to Settings {'>'} Linked Devices {'>'} Link a Device, then scan this QR code.
+                      {'Open WhatsApp on your phone, go to Settings > Linked Devices > Link a Device, then scan this QR code.'}
                     </p>
                   </div>
                 </TabsContent>
@@ -289,8 +301,11 @@ export default function LandingPage() {
                     {phoneCode && (
                       <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-center">
                         <p className="text-sm text-muted-foreground">Enter this code on WhatsApp:</p>
-                        <p className="mt-2 font-mono text-2xl font-bold tracking-widest text-primary">
+                        <p className="mt-2 font-mono text-3xl font-bold tracking-[0.3em] text-primary">
                           {phoneCode}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {'Go to WhatsApp > Settings > Linked Devices > Link a Device > Link with phone number'}
                         </p>
                         {connectionStatus === "connecting" && (
                           <div className="mt-3 flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -314,11 +329,11 @@ export default function LandingPage() {
                       ) : phoneCode ? (
                         "Regenerate Code"
                       ) : (
-                        "Get Connection Code"
+                        "Get Pairing Code"
                       )}
                     </Button>
                     <p className="text-center text-xs text-muted-foreground">
-                      A code will be generated. Enter it on your WhatsApp to connect without scanning a QR code.
+                      A pairing code will be generated. Enter it on your WhatsApp to connect without scanning a QR code.
                     </p>
                   </div>
                 </TabsContent>
@@ -330,7 +345,7 @@ export default function LandingPage() {
         {/* Footer */}
         <footer className="border-t border-border py-8">
           <div className="mx-auto max-w-6xl px-4 text-center text-sm text-muted-foreground">
-            PeterAi WhatsApp Bot Platform. Powered by Whapi.Cloud.
+            PeterAi WhatsApp Bot Platform. Powered by <span className="font-semibold text-foreground">Peter Joram</span>
           </div>
         </footer>
       </main>

@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server"
-import { getConnectionStatus } from "@/lib/whapi"
 import { requireAdmin } from "@/lib/auth"
+import { getConnectionInfo } from "@/lib/baileys"
 
 export async function GET() {
   try {
     await requireAdmin()
-    const result = await getConnectionStatus()
-    return NextResponse.json(result)
+    const info = getConnectionInfo()
+    return NextResponse.json({
+      connected: info.connected,
+      phone: info.phone,
+      status: info.status,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Server error"
     if (message === "Unauthorized") {

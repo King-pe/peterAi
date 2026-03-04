@@ -4,26 +4,38 @@
 // Singleton manager for @whiskeysockets/baileys WebSocket connection.
 // Supports QR code and pairing code (phone number) connection methods.
 // NOTE: Requires persistent Node.js process - will NOT work on Vercel serverless.
+//
+// ALL heavy native imports (baileys, pino, boom) are loaded LAZILY via
+// dynamic import() so that merely importing this file never triggers
+// the native module resolver. Pages and layouts can therefore render
+// without error even in environments that cannot load these binaries.
 
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore,
-  type WASocket,
-  type BaileysEventMap,
-  type ConnectionState,
+import type {
+  WASocket,
+  BaileysEventMap,
+  ConnectionState,
 } from "@whiskeysockets/baileys"
-import { Boom } from "@hapi/boom"
-import pino from "pino"
-import path from "path"
+
 import { handleIncomingMessage } from "./bot-handler"
 import { saveSettings } from "./storage"
 import type { WhapiMessage } from "./types"
 
-const AUTH_DIR = path.join(process.cwd(), "data", "baileys_auth")
+// ---- Lazy loaders (called only when actually needed) ----
 
-const logger = pino({ level: "silent" })
+async function loadBaileys() {
+  const mod = await import("@whiskeysockets/baileys")
+  return mod
+}
+
+async function loadBoom() {
+  const mod = await import("@hapi/boom")
+  return mod
+}
+
+async function loadPino() {
+  const mod = await import("pino")
+  return mod.default || mod
+}
 
 // ---- Singleton State ----
 
@@ -41,9 +53,6 @@ let connectionState: {
   pairingCode: null,
   status: "disconnected",
 }
-
-let qrResolve: ((qr: string) => void) | null = null
-let connectionResolve: (() => void) | null = null
 
 // ---- Public API ----
 
@@ -89,16 +98,24 @@ export async function startSocket(
     status: "connecting",
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
-  const { version } = await fetchLatestBaileysVersion()
+  // ---- Lazy-load native deps ----
+  const baileys = await loadBaileys()
+  const pinoFn = await loadPino()
+  const path = await import("path")
 
-  sock = makeWASocket({
+  const AUTH_DIR = path.join(process.cwd(), "data", "baileys_auth")
+  const logger = pinoFn({ level: "silent" })
+
+  const { state, saveCreds } = await baileys.useMultiFileAuthState(AUTH_DIR)
+  const { version } = await baileys.fetchLatestBaileysVersion()
+
+  sock = baileys.default({
     version,
-    logger,
+    logger: logger as any,
     printQRInTerminal: false,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
+      keys: baileys.makeCacheableSignalKeyStore(state.keys, logger as any),
     },
     browser: ["PeterAi", "Chrome", "1.0.0"],
     generateHighQualityLinkPreview: true,
@@ -142,20 +159,13 @@ export async function startSocket(
           })
 
           console.log("[PeterAi] WhatsApp connected as:", connectionState.phone)
-
-          if (connectionResolve) {
-            connectionResolve()
-            connectionResolve = null
-          }
-
-          // If phone mode, resolve was already done when pairing code was returned
-          // but we still want to confirm connection succeeded
         }
 
         // Connection closed
         if (connection === "close") {
-          const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut
+          const boom = await loadBoom()
+          const statusCode = (lastDisconnect?.error as InstanceType<typeof boom.Boom>)?.output?.statusCode
+          const shouldReconnect = statusCode !== baileys.DisconnectReason.loggedOut
 
           console.log(
             "[PeterAi] Connection closed. Status:",
@@ -187,7 +197,6 @@ export async function startSocket(
 
       // For phone/pairing code mode, request the code after socket initializes
       if (mode === "phone" && phoneNumber) {
-        // Wait a moment for the socket to be ready, then request pairing code
         setTimeout(async () => {
           try {
             if (!sock) {
@@ -195,7 +204,6 @@ export async function startSocket(
               reject(new Error("Socket not initialized"))
               return
             }
-            // Format phone: remove + and any non-digits
             const cleanPhone = phoneNumber.replace(/[^0-9]/g, "")
             const code = await sock.requestPairingCode(cleanPhone)
             connectionState.pairingCode = code
@@ -215,19 +223,6 @@ export async function startSocket(
   setupMessageListener()
 
   return result
-}
-
-/**
- * Wait for QR to update (for refresh polling).
- * Returns the latest QR string.
- */
-export function waitForQR(): Promise<string> {
-  if (connectionState.qr) {
-    return Promise.resolve(connectionState.qr)
-  }
-  return new Promise((resolve) => {
-    qrResolve = resolve
-  })
 }
 
 /**
@@ -254,6 +249,8 @@ export async function disconnectSocket(): Promise<boolean> {
 
     // Clean up auth files
     const fs = await import("fs/promises")
+    const path = await import("path")
+    const AUTH_DIR = path.join(process.cwd(), "data", "baileys_auth")
     try {
       await fs.rm(AUTH_DIR, { recursive: true, force: true })
     } catch {
@@ -297,10 +294,6 @@ function setupMessageListener() {
 
 // ---- Message Converter ----
 
-/**
- * Convert Baileys WAMessage to the app's internal WhapiMessage format.
- * This lets bot-handler.ts and all command files work without changes.
- */
 function convertBaileysMessage(msg: BaileysEventMap["messages.upsert"]["messages"][0]): WhapiMessage | null {
   const key = msg.key
   const messageContent = msg.message
@@ -384,7 +377,8 @@ function convertBaileysMessage(msg: BaileysEventMap["messages.upsert"]["messages
   return converted
 }
 
-// Store the raw WAMessage for media download later
+// ---- Message Store (for reactions & media download) ----
+
 const messageStore = new Map<string, BaileysEventMap["messages.upsert"]["messages"][0]>()
 
 export function storeMessage(msg: BaileysEventMap["messages.upsert"]["messages"][0]) {

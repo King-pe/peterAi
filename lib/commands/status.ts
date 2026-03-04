@@ -31,7 +31,7 @@ export async function handleStatusCommand(
       }
 
       try {
-        await reactToMessage(contextId, "\u2764\uFE0F") // Red heart emoji
+        await reactToMessage(contextId, "\u2764\uFE0F", message.chat_id) // Red heart emoji
         return {
           response: "Umefanikiwa ku-like status!",
         }

@@ -1,185 +1,54 @@
 // ============================================
-// PeterAi - Whapi.Cloud API Client
+// PeterAi - WhatsApp API Adapter (Baileys Backend)
 // ============================================
+// Thin wrapper that delegates to the Baileys socket.
+// Maintains the same export API as the old Whapi.cloud version
+// so all existing consumers (bot-handler, commands) work unchanged.
 
-import { getSettings, saveSettings } from "./storage"
+import { downloadMediaMessage } from "@whiskeysockets/baileys"
+import {
+  getSocket,
+  getConnectionState,
+  disconnectSocket,
+  getStoredMessage,
+} from "./baileys"
+import { saveSettings } from "./storage"
 
-const WHAPI_BASE = "https://gate.whapi.cloud"
-
-// Get token: first from storage, then from env variable
-async function getToken(): Promise<string> {
-  const settings = await getSettings()
-  if (settings.whapiToken) return settings.whapiToken
-  const envToken = process.env.WHAPI_API_TOKEN
-  if (envToken) return envToken
-  throw new Error("No Whapi token configured. Connect WhatsApp in dashboard.")
+function requireSocket() {
+  const sock = getSocket()
+  if (!sock) {
+    throw new Error("WhatsApp not connected. Connect via dashboard first.")
+  }
+  return sock
 }
 
-async function headers(): Promise<Record<string, string>> {
-  return {
-    Authorization: `Bearer ${await getToken()}`,
-    "Content-Type": "application/json",
-    accept: "application/json",
-  }
-}
+// ---- Connection ----
 
-async function whapiRequest(
-  endpoint: string,
-  method: string = "GET",
-  body?: Record<string, unknown>
-): Promise<unknown> {
-  const url = `${WHAPI_BASE}${endpoint}`
-  const options: RequestInit = {
-    method,
-    headers: await headers(),
-  }
-  if (body) {
-    options.body = JSON.stringify(body)
-  }
-  const res = await fetch(url, options)
-  if (!res.ok) {
-    const text = await res.text()
-    console.error(`Whapi API error [${res.status}]: ${text}`)
-    throw new Error(`Whapi API error: ${res.status} - ${text}`)
-  }
-  return res.json()
-}
-
-// ---- Login / QR Code Flow ----
-
-// Start login with phone number - returns channel token
-export async function loginWithPhone(phone: string): Promise<{
-  token?: string
-  status?: string
-  error?: string
-}> {
-  const res = await fetch(`${WHAPI_BASE}/users/login/${phone}`, {
-    method: "GET",
-    headers: {
-      accept: "application/json",
-      Authorization: `Bearer ${process.env.WHAPI_API_TOKEN || "kXdarpy0oZYsukv9KSPkjL0zmta7v13a"}`,
-    },
-  })
-  const data = await res.json() as Record<string, unknown>
-  if (data.token) {
-    // Save token to settings
-    await saveSettings({
-      whapiToken: data.token as string,
-      whapiPhone: phone,
-      botPhoneNumber: phone,
-    })
-  }
-  return data as { token?: string; status?: string; error?: string }
-}
-
-// Get QR code as base64 (for currently authenticated channel)
-export async function getQRBase64(token?: string): Promise<{
-  qr?: string
-  status?: string
-  error?: string
-}> {
-  const authToken = token || process.env.WHAPI_API_TOKEN || (await getSettings()).whapiToken
-  if (!authToken) {
-    return { error: "No token available" }
-  }
-  const res = await fetch(`${WHAPI_BASE}/users/login`, {
-    method: "GET",
-    headers: {
-      accept: "application/json",
-      Authorization: `Bearer ${authToken}`,
-    },
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    return { error: `Failed to get QR: ${text}` }
-  }
-  const data = await res.json() as Record<string, unknown>
-  return data as { qr?: string; status?: string; error?: string }
-}
-
-// Get QR code as image (PNG buffer)
-export async function getQRImage(token?: string): Promise<Buffer | null> {
-  const authToken = token || process.env.WHAPI_API_TOKEN || (await getSettings()).whapiToken
-  if (!authToken) return null
-  const res = await fetch(`${WHAPI_BASE}/users/login/image`, {
-    method: "GET",
-    headers: {
-      accept: "image/png",
-      Authorization: `Bearer ${authToken}`,
-    },
-  })
-  if (!res.ok) return null
-  const buffer = Buffer.from(await res.arrayBuffer())
-  return buffer
-}
-
-// Check connection status
 export async function getConnectionStatus(): Promise<{
   connected: boolean
   phone?: string
   status?: string
   error?: string
 }> {
-  try {
-    const token = await getToken()
-    const res = await fetch(`${WHAPI_BASE}/users`, {
-      method: "GET",
-      headers: {
-        accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    if (!res.ok) {
-      return { connected: false, status: "disconnected" }
-    }
-    const data = await res.json() as Record<string, unknown>
-    const status = (data.status as string) || ""
-    const isConnected = status === "done" || status === "connected" || !!(data.phone as string)
-    if (isConnected) {
-      await saveSettings({
-        whapiConnected: true,
-        whapiPhone: (data.phone as string) || "",
-      })
-    }
-    return {
-      connected: isConnected,
-      phone: data.phone as string,
-      status,
-    }
-  } catch {
-    return { connected: false, status: "error" }
+  const state = getConnectionState()
+  return {
+    connected: state.connected,
+    phone: state.phone || undefined,
+    status: state.status,
   }
 }
 
-// Disconnect / logout
 export async function disconnectWhatsApp(): Promise<boolean> {
-  try {
-    const token = await getToken()
-    await fetch(`${WHAPI_BASE}/users/logout`, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    await saveSettings({
-      whapiToken: "",
-      whapiConnected: false,
-      whapiPhone: "",
-    })
-    return true
-  } catch {
-    return false
-  }
+  return disconnectSocket()
 }
 
 // ---- Typing Presence ----
 
 export async function sendTypingPresence(chatId: string): Promise<void> {
   try {
-    await whapiRequest(`/presences/${chatId}`, "PUT", {
-      type: "typing",
-    })
+    const sock = getSocket()
+    if (!sock) return
+    await sock.sendPresenceUpdate("composing", chatId)
   } catch (err) {
     console.error("Failed to send typing presence:", err)
   }
@@ -188,10 +57,8 @@ export async function sendTypingPresence(chatId: string): Promise<void> {
 // ---- Send Messages ----
 
 export async function sendText(to: string, body: string) {
-  return whapiRequest("/messages/text", "POST", {
-    to,
-    body,
-  })
+  const sock = requireSocket()
+  return sock.sendMessage(to, { text: body })
 }
 
 export async function replyToMessage(
@@ -199,11 +66,14 @@ export async function replyToMessage(
   quotedMessageId: string,
   body: string
 ) {
-  return whapiRequest("/messages/text", "POST", {
-    to,
-    body,
-    quoted: quotedMessageId,
-  })
+  const sock = requireSocket()
+  // Try to find the stored message for proper quoting
+  const storedMsg = getStoredMessage(quotedMessageId)
+  if (storedMsg) {
+    return sock.sendMessage(to, { text: body }, { quoted: storedMsg })
+  }
+  // Fallback: send as plain text if we don't have the quoted message
+  return sock.sendMessage(to, { text: body })
 }
 
 export async function sendImage(
@@ -211,10 +81,10 @@ export async function sendImage(
   mediaUrl: string,
   caption?: string
 ) {
-  return whapiRequest("/messages/image", "POST", {
-    to,
-    media: mediaUrl,
-    caption,
+  const sock = requireSocket()
+  return sock.sendMessage(to, {
+    image: { url: mediaUrl },
+    caption: caption || undefined,
   })
 }
 
@@ -223,17 +93,19 @@ export async function sendVideo(
   mediaUrl: string,
   caption?: string
 ) {
-  return whapiRequest("/messages/video", "POST", {
-    to,
-    media: mediaUrl,
-    caption,
+  const sock = requireSocket()
+  return sock.sendMessage(to, {
+    video: { url: mediaUrl },
+    caption: caption || undefined,
   })
 }
 
 export async function sendAudio(to: string, mediaUrl: string) {
-  return whapiRequest("/messages/audio", "POST", {
-    to,
-    media: mediaUrl,
+  const sock = requireSocket()
+  return sock.sendMessage(to, {
+    audio: { url: mediaUrl },
+    mimetype: "audio/mp4",
+    ptt: false,
   })
 }
 
@@ -243,19 +115,44 @@ export async function sendDocument(
   filename: string,
   caption?: string
 ) {
-  return whapiRequest("/messages/document", "POST", {
-    to,
-    media: mediaUrl,
-    filename,
-    caption,
+  const sock = requireSocket()
+  return sock.sendMessage(to, {
+    document: { url: mediaUrl },
+    fileName: filename,
+    caption: caption || undefined,
+    mimetype: "application/octet-stream",
   })
 }
 
 // ---- Media ----
 
 export async function getMediaUrl(mediaId: string): Promise<string> {
-  const res = (await whapiRequest(`/media/${mediaId}`)) as { link?: string }
-  return res.link || ""
+  // In Baileys, media is downloaded directly from the message buffer.
+  // We look up the stored message and download the media.
+  const storedMsg = getStoredMessage(mediaId)
+  if (!storedMsg || !storedMsg.message) {
+    throw new Error("Message not found in store - cannot download media")
+  }
+
+  try {
+    const buffer = await downloadMediaMessage(
+      storedMsg,
+      "buffer",
+      {}
+    )
+    // Convert buffer to base64 data URL for compatibility
+    const base64 = Buffer.from(buffer as Buffer).toString("base64")
+    const mimeType =
+      storedMsg.message.imageMessage?.mimetype ||
+      storedMsg.message.videoMessage?.mimetype ||
+      storedMsg.message.audioMessage?.mimetype ||
+      storedMsg.message.documentMessage?.mimetype ||
+      "application/octet-stream"
+    return `data:${mimeType};base64,${base64}`
+  } catch (err) {
+    console.error("Failed to download media:", err)
+    throw err
+  }
 }
 
 // ---- Groups ----
@@ -264,56 +161,61 @@ export async function createGroup(
   name: string,
   participants: string[]
 ) {
-  return whapiRequest("/groups", "POST", {
-    subject: name,
-    participants,
-  })
+  const sock = requireSocket()
+  return sock.groupCreate(name, participants)
 }
 
 export async function addParticipant(
   groupId: string,
   participants: string[]
 ) {
-  return whapiRequest(`/groups/${groupId}/participants`, "POST", {
-    participants,
-  })
+  const sock = requireSocket()
+  return sock.groupParticipantsUpdate(groupId, participants, "add")
 }
 
 export async function getGroupInviteLink(
   groupId: string
 ): Promise<string> {
-  const res = (await whapiRequest(
-    `/groups/${groupId}/invite`
-  )) as { link?: string }
-  return res.link || ""
+  const sock = requireSocket()
+  const code = await sock.groupInviteCode(groupId)
+  return `https://chat.whatsapp.com/${code}`
 }
 
 // ---- Reactions ----
 
-export async function reactToMessage(messageId: string, emoji: string) {
-  return whapiRequest(`/messages/${messageId}/reaction`, "PUT", {
-    emoji,
-  })
+export async function reactToMessage(messageId: string, emoji: string, chatId?: string) {
+  const sock = requireSocket()
+  // For reactions, we need the message key (remoteJid, id, fromMe)
+  const storedMsg = getStoredMessage(messageId)
+  if (storedMsg && storedMsg.key) {
+    return sock.sendMessage(storedMsg.key.remoteJid!, {
+      react: { text: emoji, key: storedMsg.key },
+    })
+  }
+  // Fallback: construct a minimal key if we have a chatId
+  if (chatId) {
+    const key = { remoteJid: chatId, id: messageId, fromMe: false }
+    return sock.sendMessage(chatId, {
+      react: { text: emoji, key },
+    })
+  }
+  throw new Error("Cannot react - message not found and no chatId provided")
 }
 
 // ---- Status / Stories ----
 
 export async function sendStatusText(body: string) {
-  return whapiRequest("/messages/text", "POST", {
-    to: "status@broadcast",
-    body,
-  })
+  const sock = requireSocket()
+  return sock.sendMessage("status@broadcast", { text: body })
 }
 
 // ---- Contacts ----
 
 export async function checkNumber(phone: string): Promise<boolean> {
   try {
-    const res = (await whapiRequest("/contacts", "POST", {
-      blocking: "wait",
-      contacts: [phone],
-    })) as { contacts?: { wa_id?: string }[] }
-    return !!res.contacts?.[0]?.wa_id
+    const sock = requireSocket()
+    const [result] = await sock.onWhatsApp(phone)
+    return result?.exists || false
   } catch {
     return false
   }

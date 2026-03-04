@@ -57,9 +57,8 @@ export interface BotSettings {
   currency: string
   maxMessageLength: number
   aiModel: string
-  whapiToken: string         // Whapi channel token (from QR login or env)
-  whapiConnected: boolean    // Whether WhatsApp device is linked
-  whapiPhone: string         // Connected WhatsApp phone number
+  baileysConnected: boolean  // Whether WhatsApp device is linked via Baileys
+  baileysPhone: string       // Connected WhatsApp phone number
   autoTypingEnabled: boolean // Show "typing..." before responding
   autoReactionEnabled: boolean // React with contextual emoji to incoming messages
 }

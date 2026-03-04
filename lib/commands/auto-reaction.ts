@@ -27,7 +27,8 @@ function pickRandom<T>(arr: T[]): T {
 
 export async function analyzeAndReact(
   messageId: string,
-  messageText: string
+  messageText: string,
+  chatId?: string
 ): Promise<void> {
   // Randomness gate: skip ~40% of messages
   if (Math.random() > REACT_PROBABILITY) return
@@ -51,7 +52,7 @@ export async function analyzeAndReact(
     if (category === "question" && Math.random() > 0.3) return
 
     const emoji = pickRandom(emojis)
-    await reactToMessage(messageId, emoji)
+    await reactToMessage(messageId, emoji, chatId)
   } catch (err) {
     // Silently fail - reactions are non-critical
     console.error("Auto-reaction error:", err)

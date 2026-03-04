@@ -20,8 +20,9 @@ export async function PUT(request: Request) {
   try {
     await requireAdmin()
     const updates = await request.json()
-    // Don't allow overwriting sensitive fields from client
-    delete updates.whapiToken
+    // Don't allow overwriting connection fields from client
+    delete updates.baileysConnected
+    delete updates.baileysPhone
     const settings = await saveSettings(updates)
     return NextResponse.json(settings)
   } catch (err) {

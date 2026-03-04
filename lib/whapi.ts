@@ -4,16 +4,15 @@
 // Thin wrapper that delegates to the Baileys socket.
 // Maintains the same export API as the old Whapi.cloud version
 // so all existing consumers (bot-handler, commands) work unchanged.
-//
-// All imports of baileys are lazy so this module can be safely imported
-// without crashing in environments where native modules can't load.
 
+import { downloadMediaMessage } from "@whiskeysockets/baileys"
 import {
   getSocket,
   getConnectionState,
   disconnectSocket,
   getStoredMessage,
 } from "./baileys"
+import { saveSettings } from "./storage"
 
 function requireSocket() {
   const sock = getSocket()
@@ -68,10 +67,12 @@ export async function replyToMessage(
   body: string
 ) {
   const sock = requireSocket()
+  // Try to find the stored message for proper quoting
   const storedMsg = getStoredMessage(quotedMessageId)
   if (storedMsg) {
-    return sock.sendMessage(to, { text: body }, { quoted: storedMsg as never })
+    return sock.sendMessage(to, { text: body }, { quoted: storedMsg })
   }
+  // Fallback: send as plain text if we don't have the quoted message
   return sock.sendMessage(to, { text: body })
 }
 
@@ -126,25 +127,26 @@ export async function sendDocument(
 // ---- Media ----
 
 export async function getMediaUrl(mediaId: string): Promise<string> {
+  // In Baileys, media is downloaded directly from the message buffer.
+  // We look up the stored message and download the media.
   const storedMsg = getStoredMessage(mediaId)
-  if (!storedMsg) {
+  if (!storedMsg || !storedMsg.message) {
     throw new Error("Message not found in store - cannot download media")
   }
 
   try {
-    const { downloadMediaMessage } = await import("@whiskeysockets/baileys")
     const buffer = await downloadMediaMessage(
-      storedMsg as never,
+      storedMsg,
       "buffer",
       {}
     )
+    // Convert buffer to base64 data URL for compatibility
     const base64 = Buffer.from(buffer as Buffer).toString("base64")
-    const msg = storedMsg as Record<string, Record<string, Record<string, unknown>>>
     const mimeType =
-      msg?.message?.imageMessage?.mimetype as string ||
-      msg?.message?.videoMessage?.mimetype as string ||
-      msg?.message?.audioMessage?.mimetype as string ||
-      msg?.message?.documentMessage?.mimetype as string ||
+      storedMsg.message.imageMessage?.mimetype ||
+      storedMsg.message.videoMessage?.mimetype ||
+      storedMsg.message.audioMessage?.mimetype ||
+      storedMsg.message.documentMessage?.mimetype ||
       "application/octet-stream"
     return `data:${mimeType};base64,${base64}`
   } catch (err) {
@@ -183,16 +185,18 @@ export async function getGroupInviteLink(
 
 export async function reactToMessage(messageId: string, emoji: string, chatId?: string) {
   const sock = requireSocket()
-  const storedMsg = getStoredMessage(messageId) as { key?: { remoteJid?: string; id?: string; fromMe?: boolean } } | undefined
+  // For reactions, we need the message key (remoteJid, id, fromMe)
+  const storedMsg = getStoredMessage(messageId)
   if (storedMsg && storedMsg.key) {
     return sock.sendMessage(storedMsg.key.remoteJid!, {
-      react: { text: emoji, key: storedMsg.key as never },
+      react: { text: emoji, key: storedMsg.key },
     })
   }
+  // Fallback: construct a minimal key if we have a chatId
   if (chatId) {
     const key = { remoteJid: chatId, id: messageId, fromMe: false }
     return sock.sendMessage(chatId, {
-      react: { text: emoji, key: key as never },
+      react: { text: emoji, key },
     })
   }
   throw new Error("Cannot react - message not found and no chatId provided")

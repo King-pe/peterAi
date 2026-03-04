@@ -11,7 +11,6 @@ const nextConfig = {
     "@whiskeysockets/baileys",
     "pino",
     "@hapi/boom",
-    "qrcode",
   ],
 }
 

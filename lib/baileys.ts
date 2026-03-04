@@ -4,12 +4,26 @@
 // Singleton manager for @whiskeysockets/baileys WebSocket connection.
 // Supports QR code and pairing code (phone number) connection methods.
 // NOTE: Requires persistent Node.js process - will NOT work on Vercel serverless.
-//
-// All imports of @whiskeysockets/baileys are done lazily via dynamic import()
-// so this module can be safely imported from server code without crashing
-// at module-evaluation time in environments where native modules are absent.
 
-import type { WASocket } from "@whiskeysockets/baileys"
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
+  type WASocket,
+  type BaileysEventMap,
+  type ConnectionState,
+} from "@whiskeysockets/baileys"
+import { Boom } from "@hapi/boom"
+import pino from "pino"
+import path from "path"
+import { handleIncomingMessage } from "./bot-handler"
+import { saveSettings } from "./storage"
+import type { WhapiMessage } from "./types"
+
+const AUTH_DIR = path.join(process.cwd(), "data", "baileys_auth")
+
+const logger = pino({ level: "silent" })
 
 // ---- Singleton State ----
 
@@ -28,15 +42,8 @@ let connectionState: {
   status: "disconnected",
 }
 
-// Store raw WAMessage for media download and reactions later
-const messageStore = new Map<string, unknown>()
-
-// ---- Lazy loader ----
-
-async function loadBaileys() {
-  const mod = await import("@whiskeysockets/baileys")
-  return mod
-}
+let qrResolve: ((qr: string) => void) | null = null
+let connectionResolve: (() => void) | null = null
 
 // ---- Public API ----
 
@@ -82,17 +89,6 @@ export async function startSocket(
     status: "connecting",
   }
 
-  // Dynamic imports - these will only load when startSocket is actually called
-  const baileys = await loadBaileys()
-  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = baileys
-  const { Boom } = await import("@hapi/boom")
-  const pino = (await import("pino")).default
-  const path = await import("path")
-  const { saveSettings } = await import("./storage")
-
-  const AUTH_DIR = path.join(process.cwd(), "data", "baileys_auth")
-  const logger = pino({ level: "silent" })
-
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
   const { version } = await fetchLatestBaileysVersion()
 
@@ -118,7 +114,7 @@ export async function startSocket(
         reject(new Error("Connection timeout - no QR or pairing code received within 30s"))
       }, 30000)
 
-      sock!.ev.on("connection.update", async (update) => {
+      sock!.ev.on("connection.update", async (update: Partial<ConnectionState>) => {
         const { connection, lastDisconnect, qr } = update
 
         // QR code received
@@ -146,11 +142,19 @@ export async function startSocket(
           })
 
           console.log("[PeterAi] WhatsApp connected as:", connectionState.phone)
+
+          if (connectionResolve) {
+            connectionResolve()
+            connectionResolve = null
+          }
+
+          // If phone mode, resolve was already done when pairing code was returned
+          // but we still want to confirm connection succeeded
         }
 
         // Connection closed
         if (connection === "close") {
-          const statusCode = (lastDisconnect?.error as InstanceType<typeof Boom>)?.output?.statusCode
+          const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut
 
           console.log(
@@ -214,6 +218,19 @@ export async function startSocket(
 }
 
 /**
+ * Wait for QR to update (for refresh polling).
+ * Returns the latest QR string.
+ */
+export function waitForQR(): Promise<string> {
+  if (connectionState.qr) {
+    return Promise.resolve(connectionState.qr)
+  }
+  return new Promise((resolve) => {
+    qrResolve = resolve
+  })
+}
+
+/**
  * Disconnect and logout the current session.
  */
 export async function disconnectSocket(): Promise<boolean> {
@@ -230,8 +247,6 @@ export async function disconnectSocket(): Promise<boolean> {
       pairingCode: null,
       status: "disconnected",
     }
-
-    const { saveSettings } = await import("./storage")
     await saveSettings({
       baileysConnected: false,
       baileysPhone: "",
@@ -239,8 +254,6 @@ export async function disconnectSocket(): Promise<boolean> {
 
     // Clean up auth files
     const fs = await import("fs/promises")
-    const path = await import("path")
-    const AUTH_DIR = path.join(process.cwd(), "data", "baileys_auth")
     try {
       await fs.rm(AUTH_DIR, { recursive: true, force: true })
     } catch {
@@ -259,11 +272,8 @@ export async function disconnectSocket(): Promise<boolean> {
 function setupMessageListener() {
   if (!sock) return
 
-  sock.ev.on("messages.upsert", async (m) => {
+  sock.ev.on("messages.upsert", async (m: BaileysEventMap["messages.upsert"]) => {
     if (m.type !== "notify") return
-
-    // Lazy import handleIncomingMessage only when messages actually arrive
-    const { handleIncomingMessage } = await import("./bot-handler")
 
     for (const msg of m.messages) {
       try {
@@ -287,13 +297,11 @@ function setupMessageListener() {
 
 // ---- Message Converter ----
 
-import type { WhapiMessage } from "./types"
-
 /**
  * Convert Baileys WAMessage to the app's internal WhapiMessage format.
  * This lets bot-handler.ts and all command files work without changes.
  */
-function convertBaileysMessage(msg: { key: { remoteJid?: string | null; fromMe?: boolean | null; id?: string | null; participant?: string | null }; message?: Record<string, unknown> | null; pushName?: string | null; messageTimestamp?: number | Long | null }): WhapiMessage | null {
+function convertBaileysMessage(msg: BaileysEventMap["messages.upsert"]["messages"][0]): WhapiMessage | null {
   const key = msg.key
   const messageContent = msg.message
 
@@ -307,26 +315,25 @@ function convertBaileysMessage(msg: { key: { remoteJid?: string | null; fromMe?:
 
   // Extract text
   const textBody =
-    (messageContent as Record<string, unknown>).conversation as string ||
-    ((messageContent as Record<string, Record<string, unknown>>).extendedTextMessage as Record<string, unknown>)?.text as string ||
+    messageContent.conversation ||
+    messageContent.extendedTextMessage?.text ||
     ""
 
   // Extract context (quoted message)
-  const extendedText = (messageContent as Record<string, Record<string, unknown>>).extendedTextMessage as Record<string, unknown> | undefined
-  const contextInfo = extendedText?.contextInfo as Record<string, unknown> | undefined
+  const contextInfo = messageContent.extendedTextMessage?.contextInfo
   const context = contextInfo
     ? {
-        id: (contextInfo.stanzaId as string) || "",
-        from: (contextInfo.participant as string) || "",
-        body: ((contextInfo.quotedMessage as Record<string, unknown>)?.conversation as string) || "",
+        id: contextInfo.stanzaId || "",
+        from: contextInfo.participant || "",
+        body: contextInfo.quotedMessage?.conversation || "",
       }
     : undefined
 
   // Extract media
-  const imageMsg = (messageContent as Record<string, Record<string, unknown>>).imageMessage as Record<string, unknown> | undefined
-  const videoMsg = (messageContent as Record<string, Record<string, unknown>>).videoMessage as Record<string, unknown> | undefined
-  const audioMsg = (messageContent as Record<string, Record<string, unknown>>).audioMessage as Record<string, unknown> | undefined
-  const docMsg = (messageContent as Record<string, Record<string, unknown>>).documentMessage as Record<string, unknown> | undefined
+  const imageMsg = messageContent.imageMessage
+  const videoMsg = messageContent.videoMessage
+  const audioMsg = messageContent.audioMessage
+  const docMsg = messageContent.documentMessage
 
   const converted: WhapiMessage = {
     id: key.id || "",
@@ -334,7 +341,7 @@ function convertBaileysMessage(msg: { key: { remoteJid?: string | null; fromMe?:
     subtype: "",
     chat_id: chatId,
     from,
-    from_name: (msg.pushName as string) || "",
+    from_name: msg.pushName || "",
     to: chatId,
     timestamp: msg.messageTimestamp
       ? typeof msg.messageTimestamp === "number"
@@ -345,28 +352,28 @@ function convertBaileysMessage(msg: { key: { remoteJid?: string | null; fromMe?:
     image: imageMsg
       ? {
           id: key.id || "",
-          mime_type: (imageMsg.mimetype as string) || "image/jpeg",
-          caption: (imageMsg.caption as string) || undefined,
+          mime_type: imageMsg.mimetype || "image/jpeg",
+          caption: imageMsg.caption || undefined,
         }
       : undefined,
     video: videoMsg
       ? {
           id: key.id || "",
-          mime_type: (videoMsg.mimetype as string) || "video/mp4",
-          caption: (videoMsg.caption as string) || undefined,
+          mime_type: videoMsg.mimetype || "video/mp4",
+          caption: videoMsg.caption || undefined,
         }
       : undefined,
     audio: audioMsg
       ? {
           id: key.id || "",
-          mime_type: (audioMsg.mimetype as string) || "audio/ogg",
+          mime_type: audioMsg.mimetype || "audio/ogg",
         }
       : undefined,
     document: docMsg
       ? {
           id: key.id || "",
-          mime_type: (docMsg.mimetype as string) || "application/octet-stream",
-          filename: (docMsg.fileName as string) || undefined,
+          mime_type: docMsg.mimetype || "application/octet-stream",
+          filename: docMsg.fileName || undefined,
         }
       : undefined,
     context,
@@ -377,16 +384,16 @@ function convertBaileysMessage(msg: { key: { remoteJid?: string | null; fromMe?:
   return converted
 }
 
-// ---- Message Store ----
+// Store the raw WAMessage for media download later
+const messageStore = new Map<string, BaileysEventMap["messages.upsert"]["messages"][0]>()
 
-export function storeMessage(msg: unknown) {
-  const m = msg as { key?: { id?: string } }
-  if (m.key?.id) {
-    messageStore.set(m.key.id, msg)
+export function storeMessage(msg: BaileysEventMap["messages.upsert"]["messages"][0]) {
+  if (msg.key.id) {
+    messageStore.set(msg.key.id, msg)
     // Keep only last 1000 messages
     if (messageStore.size > 1000) {
       const firstKey = messageStore.keys().next().value
-      if (firstKey) messageStore.delete(firstKey as string)
+      if (firstKey) messageStore.delete(firstKey)
     }
   }
 }

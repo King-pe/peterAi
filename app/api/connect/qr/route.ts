@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { startSocket, getConnectionState } from "@/lib/baileys"
 import { requireAdmin } from "@/lib/auth"
+import QRCode from "qrcode"
 
 export async function GET() {
   try {
@@ -16,8 +17,6 @@ export async function GET() {
     const result = await startSocket("qr")
 
     if (result.qr) {
-      // Lazy import qrcode to avoid module-level issues
-      const QRCode = (await import("qrcode")).default
       // Convert QR string to base64 PNG image
       const qrBase64 = await QRCode.toDataURL(result.qr, {
         width: 512,

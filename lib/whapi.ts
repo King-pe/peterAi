@@ -4,8 +4,10 @@
 // Thin wrapper that delegates to the Baileys socket.
 // Maintains the same export API as the old Whapi.cloud version
 // so all existing consumers (bot-handler, commands) work unchanged.
+//
+// NO top-level imports of @whiskeysockets/baileys here -- everything
+// is loaded lazily to avoid crashing the module resolver on serverless.
 
-import { downloadMediaMessage } from "@whiskeysockets/baileys"
 import {
   getSocket,
   getConnectionState,
@@ -135,6 +137,7 @@ export async function getMediaUrl(mediaId: string): Promise<string> {
   }
 
   try {
+    const { downloadMediaMessage } = await import("@whiskeysockets/baileys")
     const buffer = await downloadMediaMessage(
       storedMsg,
       "buffer",

@@ -89,7 +89,7 @@ export async function handleIncomingMessage(
 
     // Auto-reaction: analyze incoming message and react (async, non-blocking)
     if (settings.autoReactionEnabled && messageText) {
-      analyzeAndReact(message.id, messageText).catch(() => {})
+      analyzeAndReact(message.id, messageText, chatId).catch(() => {})
     }
 
     // Parse command

@@ -24,9 +24,8 @@ const DEFAULT_SETTINGS: BotSettings = {
   currency: "TZS",
   maxMessageLength: 4096,
   aiModel: "llama-3.3-70b-versatile",
-  whapiToken: "",
-  whapiConnected: false,
-  whapiPhone: "",
+  baileysConnected: false,
+  baileysPhone: "",
   autoTypingEnabled: true,
   autoReactionEnabled: true,
 }

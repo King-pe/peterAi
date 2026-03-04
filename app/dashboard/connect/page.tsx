@@ -140,7 +140,7 @@ export default function ConnectPage() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Connect WhatsApp</h1>
-        <p className="text-muted-foreground">Link your WhatsApp device to PeterAi</p>
+        <p className="text-muted-foreground">Link your WhatsApp device to PeterAi using Baileys (direct connection)</p>
       </div>
 
       {/* Status Card */}
@@ -215,6 +215,9 @@ export default function ConnectPage() {
                         alt="WhatsApp QR Code"
                         className="h-64 w-64"
                       />
+                      <p className="mt-2 text-xs text-muted-foreground text-center">
+                        Open WhatsApp {'>'} Settings {'>'} Linked Devices {'>'} Link a Device
+                      </p>
                       {connectionStatus === "connecting" && (
                         <div className="mt-2 flex items-center justify-center gap-2 text-sm text-muted-foreground">
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -260,6 +263,9 @@ export default function ConnectPage() {
                       <p className="text-sm text-muted-foreground">Enter this code on WhatsApp:</p>
                       <p className="mt-2 font-mono text-2xl font-bold tracking-widest text-primary">
                         {phoneCode}
+                      </p>
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Go to WhatsApp {'>'} Settings {'>'} Linked Devices {'>'} Link a Device {'>'} Link with Phone Number
                       </p>
                       {connectionStatus === "connecting" && (
                         <div className="mt-3 flex items-center justify-center gap-2 text-sm text-muted-foreground">

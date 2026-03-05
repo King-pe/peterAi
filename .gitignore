@@ -28,3 +28,11 @@ next-env.d.ts
 
 # data storage
 /data
+
+# database
+*.db
+*.sqlite
+*.sqlite3
+
+# PM2
+ecosystem.config.js

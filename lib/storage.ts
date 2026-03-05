@@ -1,12 +1,13 @@
+
 // ============================================
-// PeterAi - JSON File-Based Storage
+// PeterAi - PostgreSQL Database Storage
 // ============================================
 
-import { promises as fs } from "fs"
-import path from "path"
-import type { User, Payment, LogEntry, BotSettings } from "./types"
-
-const DATA_DIR = path.join(process.cwd(), "data")
+import type { User, Payment, LogEntry, BotSettings } from "./types";
+import { query, getUser as dbGetUser, getUsers as dbGetUsers, saveUser as dbSaveUser, updateUser as dbUpdateUser, deleteUser as dbDeleteUser } from "./db";
+import { getPayments as dbGetPayments, getPayment as dbGetPayment, savePayment as dbSavePayment, updatePayment as dbUpdatePayment } from "./db";
+import { getLogs as dbGetLogs, saveLog as dbSaveLog } from "./db";
+import { getSettings as dbGetSettings, saveSettings as dbSaveSettings } from "./db";
 
 const DEFAULT_SETTINGS: BotSettings = {
   botName: "PeterAi",
@@ -28,73 +29,30 @@ const DEFAULT_SETTINGS: BotSettings = {
   baileysPhone: "",
   autoTypingEnabled: true,
   autoReactionEnabled: true,
-}
-
-async function ensureDataDir() {
-  try {
-    await fs.access(DATA_DIR)
-  } catch {
-    await fs.mkdir(DATA_DIR, { recursive: true })
-  }
-}
-
-async function readJsonFile<T>(filename: string, defaultValue: T): Promise<T> {
-  await ensureDataDir()
-  const filePath = path.join(DATA_DIR, filename)
-  try {
-    const data = await fs.readFile(filePath, "utf-8")
-    return JSON.parse(data) as T
-  } catch {
-    await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2))
-    return defaultValue
-  }
-}
-
-async function writeJsonFile<T>(filename: string, data: T): Promise<void> {
-  await ensureDataDir()
-  const filePath = path.join(DATA_DIR, filename)
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2))
-}
+};
 
 // ---- Users ----
 export async function getUsers(): Promise<User[]> {
-  return readJsonFile<User[]>("users.json", [])
+  return dbGetUsers();
 }
 
 export async function getUser(phone: string): Promise<User | null> {
-  const users = await getUsers()
-  return users.find((u) => u.phone === phone) || null
+  return dbGetUser(phone);
 }
 
 export async function saveUser(user: User): Promise<void> {
-  const users = await getUsers()
-  const index = users.findIndex((u) => u.phone === user.phone)
-  if (index >= 0) {
-    users[index] = user
-  } else {
-    users.push(user)
-  }
-  await writeJsonFile("users.json", users)
+  return dbSaveUser(user);
 }
 
 export async function updateUser(
   phone: string,
   updates: Partial<User>
 ): Promise<User | null> {
-  const users = await getUsers()
-  const index = users.findIndex((u) => u.phone === phone)
-  if (index < 0) return null
-  users[index] = { ...users[index], ...updates }
-  await writeJsonFile("users.json", users)
-  return users[index]
+  return dbUpdateUser(phone, updates);
 }
 
 export async function deleteUser(phone: string): Promise<boolean> {
-  const users = await getUsers()
-  const filtered = users.filter((u) => u.phone !== phone)
-  if (filtered.length === users.length) return false
-  await writeJsonFile("users.json", filtered)
-  return true
+  return dbDeleteUser(phone);
 }
 
 export function createNewUser(phone: string, name: string): User {
@@ -108,55 +66,36 @@ export function createNewUser(phone: string, name: string): User {
     lastActive: new Date().toISOString(),
     totalMessages: 0,
     totalSpent: 0,
-  }
+  };
 }
 
 // ---- Payments ----
 export async function getPayments(): Promise<Payment[]> {
-  return readJsonFile<Payment[]>("payments.json", [])
+  return dbGetPayments();
 }
 
 export async function getPayment(orderId: string): Promise<Payment | null> {
-  const payments = await getPayments()
-  return payments.find((p) => p.orderId === orderId) || null
+  return dbGetPayment(orderId);
 }
 
 export async function savePayment(payment: Payment): Promise<void> {
-  const payments = await getPayments()
-  const index = payments.findIndex((p) => p.orderId === payment.orderId)
-  if (index >= 0) {
-    payments[index] = payment
-  } else {
-    payments.push(payment)
-  }
-  await writeJsonFile("payments.json", payments)
+  return dbSavePayment(payment);
 }
 
 export async function updatePayment(
   orderId: string,
   updates: Partial<Payment>
 ): Promise<Payment | null> {
-  const payments = await getPayments()
-  const index = payments.findIndex((p) => p.orderId === orderId)
-  if (index < 0) return null
-  payments[index] = { ...payments[index], ...updates }
-  await writeJsonFile("payments.json", payments)
-  return payments[index]
+  return dbUpdatePayment(orderId, updates);
 }
 
 // ---- Logs ----
 export async function getLogs(): Promise<LogEntry[]> {
-  return readJsonFile<LogEntry[]>("logs.json", [])
+  return dbGetLogs();
 }
 
 export async function saveLog(log: LogEntry): Promise<void> {
-  const logs = await getLogs()
-  logs.unshift(log) // newest first
-  // Keep only last 10000 logs
-  if (logs.length > 10000) {
-    logs.length = 10000
-  }
-  await writeJsonFile("logs.json", logs)
+  return dbSaveLog(log);
 }
 
 export function createLogEntry(
@@ -176,34 +115,31 @@ export function createLogEntry(
     response,
     type,
     timestamp: new Date().toISOString(),
-  }
+  };
 }
 
 // ---- Settings ----
 export async function getSettings(): Promise<BotSettings> {
-  return readJsonFile<BotSettings>("settings.json", DEFAULT_SETTINGS)
+  return dbGetSettings();
 }
 
 export async function saveSettings(
   settings: Partial<BotSettings>
 ): Promise<BotSettings> {
-  const current = await getSettings()
-  const updated = { ...current, ...settings }
-  await writeJsonFile("settings.json", updated)
-  return updated
+  return dbSaveSettings(settings);
 }
 
 // ---- Utility: Check Subscription ----
 export function isSubscriptionActive(user: User): boolean {
-  if (!user.subscription.active) return false
-  if (!user.subscription.expiresAt) return false
-  return new Date(user.subscription.expiresAt) > new Date()
+  if (!user.subscription.active) return false;
+  if (!user.subscription.expiresAt) return false;
+  return new Date(user.subscription.expiresAt) > new Date();
 }
 
 export function hasCredits(user: User, cost: number = 1): boolean {
-  return user.credits >= cost
+  return user.credits >= cost;
 }
 
 export function canUseBot(user: User, creditCost: number = 1): boolean {
-  return isSubscriptionActive(user) || hasCredits(user, creditCost)
+  return isSubscriptionActive(user) || hasCredits(user, creditCost);
 }

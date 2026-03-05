@@ -1,3 +1,4 @@
+
 // ============================================
 // PeterAi - Baileys WhatsApp Socket Manager
 // ============================================
@@ -117,12 +118,14 @@ export async function startSocket(
       creds: state.creds,
       keys: baileys.makeCacheableSignalKeyStore(state.keys, logger as any),
     },
-    browser: ["PeterAi", "Chrome", "1.0.0"],
+    browser: ["PeterAi", "Chrome", "119.0.0.0"], // Specify Chrome version for security
     generateHighQualityLinkPreview: true,
   })
 
   // ---- Credentials Update ----
   sock.ev.on("creds.update", saveCreds)
+
+  let qrRefreshInterval: NodeJS.Timeout | null = null;
 
   // ---- Connection Update ----
   const result = await new Promise<{ qr?: string; pairingCode?: string }>(
@@ -131,20 +134,46 @@ export async function startSocket(
         reject(new Error("Connection timeout - no QR or pairing code received within 30s"))
       }, 30000)
 
-      sock!.ev.on("connection.update", async (update: Partial<ConnectionState>) => {
-        const { connection, lastDisconnect, qr } = update
+      sock!.ev.on("qr", (qr: string) => {
+        connectionState.qr = qr;
+        connectionState.status = "connecting";
+        resolve({ qr });
 
-        // QR code received
-        if (qr && mode === "qr") {
-          connectionState.qr = qr
-          connectionState.status = "connecting"
-          clearTimeout(timeout)
-          resolve({ qr })
+        // Clear any existing interval before setting a new one
+        if (qrRefreshInterval) {
+          clearInterval(qrRefreshInterval);
         }
+        // Set up QR refresh every 15 seconds
+        qrRefreshInterval = setInterval(() => {
+          if (sock && connectionState.status === "connecting" && connectionState.qr) {
+            // Re-emit QR to trigger frontend refresh
+            sock.ev.emit("qr", connectionState.qr);
+          } else {
+            clearInterval(qrRefreshInterval!); // Clear if connection is no longer connecting or QR is gone
+            qrRefreshInterval = null;
+          }
+        }, 15000);
+      });
+
+      sock!.ev.on("connection.update", async (update: Partial<ConnectionState>) => {
+        const { connection, lastDisconnect } = update
+
+        // QR code received is now handled by the dedicated 'qr' event listener.
+        // This block is no longer needed for initial QR handling.
+        // if (qr && mode === "qr") {
+        //   connectionState.qr = qr
+        //   connectionState.status = "connecting"
+        //   clearTimeout(timeout)
+        //   resolve({ qr })
+        // }
 
         // Connection opened
         if (connection === "open") {
-          clearTimeout(timeout)
+          clearTimeout(timeout);
+          if (qrRefreshInterval) {
+            clearInterval(qrRefreshInterval);
+            qrRefreshInterval = null;
+          }
           const me = sock?.user
           connectionState.connected = true
           connectionState.phone = me?.id?.split(":")[0] || phoneNumber || ""
@@ -176,6 +205,10 @@ export async function startSocket(
 
           connectionState.connected = false
           connectionState.status = "disconnected"
+          if (qrRefreshInterval) {
+            clearInterval(qrRefreshInterval);
+            qrRefreshInterval = null;
+          }
 
           if (shouldReconnect) {
             // Auto-reconnect after a short delay
@@ -196,6 +229,11 @@ export async function startSocket(
       })
 
       // For phone/pairing code mode, request the code after socket initializes
+      // Clear QR refresh interval if switching to phone mode
+      if (qrRefreshInterval) {
+        clearInterval(qrRefreshInterval);
+        qrRefreshInterval = null;
+      }
       if (mode === "phone" && phoneNumber) {
         setTimeout(async () => {
           try {

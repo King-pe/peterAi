@@ -84,7 +84,7 @@ export default function ConnectPage() {
   // Auto-refresh QR
   useEffect(() => {
     if (connectionStatus !== "connecting" || !qrData) return
-    const interval = setInterval(fetchQR, 20000)
+    const interval = setInterval(fetchQR, 15000)
     return () => clearInterval(interval)
   }, [connectionStatus, qrData])
 

@@ -12,6 +12,7 @@ const nextConfig = {
     "pino",
     "@hapi/boom",
     "qrcode",
+    "pg", // PostgreSQL driver
   ],
 }
 

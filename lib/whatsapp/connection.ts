@@ -129,13 +129,22 @@ export async function getConnectionStatus() {
 
 export async function requestPairingCode(phoneNumber: string): Promise<string | null> {
   try {
-    // Clean phone number
-    const cleanPhone = phoneNumber.replace(/\D/g, '')
+    // Clean phone number - ensure it starts with country code
+    let cleanPhone = phoneNumber.replace(/\D/g, '')
     
-    if (!cleanPhone || cleanPhone.length < 10) {
-      console.error('[v0] Invalid phone number:', phoneNumber)
+    // Handle Tanzania numbers
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '255' + cleanPhone.slice(1)
+    } else if (!cleanPhone.startsWith('255') && cleanPhone.length === 9) {
+      cleanPhone = '255' + cleanPhone
+    }
+    
+    if (!cleanPhone || cleanPhone.length < 12) {
+      console.error('[v0] Invalid phone number:', phoneNumber, '-> cleaned:', cleanPhone)
       return null
     }
+
+    console.log('[v0] Requesting pairing code for:', cleanPhone)
 
     // If already connected, return null
     if (connectionStatus.connected) {
@@ -143,31 +152,105 @@ export async function requestPairingCode(phoneNumber: string): Promise<string | 
       return null
     }
 
-    // Initialize connection if not already done
-    if (!socket) {
-      pairingCodeRequested = true
-      await initializeConnection(true)
-      // Wait for socket to be ready
-      await new Promise(resolve => setTimeout(resolve, 3000))
-    }
-
-    if (socket && !connectionStatus.connected) {
-      pairingCodeRequested = true
-      console.log('[v0] Requesting pairing code for:', cleanPhone)
-      
+    // Reset connection to ensure fresh state for pairing
+    if (socket) {
       try {
-        const code = await socket.requestPairingCode(cleanPhone)
-        console.log('[v0] Pairing code received:', code)
-        return code
-      } catch (err) {
-        console.error('[v0] Error requesting pairing code:', err)
-        // If pairing code fails, reset and let QR code work
-        pairingCodeRequested = false
-        return null
+        socket.ev.removeAllListeners('connection.update')
+        socket.ev.removeAllListeners('creds.update')
+        socket = null
+      } catch (e) {
+        console.log('[v0] Error cleaning up socket:', e)
       }
     }
 
-    return null
+    // Initialize fresh connection for pairing
+    pairingCodeRequested = true
+    qrCode = null
+    
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER)
+    const { version } = await fetchLatestBaileysVersion()
+
+    socket = makeWASocket({
+      version,
+      logger,
+      printQRInTerminal: false,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      browser: ['PeterAi Bot', 'Chrome', '120.0.0'],
+    })
+
+    // Setup connection handler
+    socket.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect } = update
+
+      if (connection === 'close') {
+        const shouldReconnect =
+          (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut
+        connectionStatus.connected = false
+        
+        if (shouldReconnect && !pairingCodeRequested) {
+          setTimeout(() => initializeConnection(), 5000)
+        }
+      } else if (connection === 'open') {
+        connectionStatus.connected = true
+        connectionStatus.phoneNumber = socket?.user?.id?.split(':')[0] || null
+        pairingCodeRequested = false
+        console.log('[v0] WhatsApp connected via pairing code:', connectionStatus.phoneNumber)
+        
+        if (socket) {
+          setupMessageHandler(socket)
+        }
+      }
+    })
+
+    socket.ev.on('creds.update', saveCreds)
+
+    // Wait for socket to be ready - longer timeout
+    await new Promise(resolve => setTimeout(resolve, 3000))
+
+    if (socket) {
+      // Check if already registered
+      if (socket.authState?.creds?.registered) {
+        console.log('[v0] Device already registered')
+        pairingCodeRequested = false
+        return null
+      }
+
+      try {
+        console.log('[v0] Socket ready, requesting pairing code for:', cleanPhone)
+        
+        // Add timeout wrapper for pairing code request
+        const timeoutPromise = new Promise<null>((resolve) => {
+          setTimeout(() => {
+            console.log('[v0] Pairing code request timed out')
+            resolve(null)
+          }, 30000) // 30 second timeout
+        })
+
+        const codePromise = socket.requestPairingCode(cleanPhone)
+        const code = await Promise.race([codePromise, timeoutPromise])
+        
+        if (code) {
+          console.log('[v0] Pairing code received:', code)
+          return code
+        } else {
+          console.log('[v0] No pairing code received')
+          pairingCodeRequested = false
+          return null
+        }
+      } catch (err: unknown) {
+        const error = err as Error
+        console.error('[v0] Error requesting pairing code:', error.message, error)
+        pairingCodeRequested = false
+        return null
+      }
+    } else {
+      console.log('[v0] Socket not initialized')
+      pairingCodeRequested = false
+      return null
+    }
   } catch (error) {
     console.error('[v0] Error in requestPairingCode:', error)
     pairingCodeRequested = false

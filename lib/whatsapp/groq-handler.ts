@@ -88,7 +88,7 @@ export async function deductCredit(userId: string): Promise<boolean> {
   try {
     const { data: user } = await supabase
       .from('bot_users')
-      .select('credits, subscription_active')
+      .select('credits, subscription_active, total_messages')
       .eq('id', userId)
       .single()
 
@@ -99,13 +99,19 @@ export async function deductCredit(userId: string): Promise<boolean> {
 
     if (user.credits <= 0) return false
 
-    await supabase
+    // Deduct credit and increment total messages
+    const { error } = await supabase
       .from('bot_users')
       .update({ 
         credits: user.credits - 1,
-        total_messages: supabase.rpc('increment_counter', { row_id: userId })
+        total_messages: (user.total_messages || 0) + 1
       })
       .eq('id', userId)
+
+    if (error) {
+      console.error('Error updating credits:', error)
+      return false
+    }
 
     return true
   } catch (error) {

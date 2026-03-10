@@ -7,10 +7,25 @@ const PETERPAY_BASE = "https://www.peterpay.link/api/v1"
 function getApiKey(): string {
   const key = process.env.PETERPAY_API_KEY
   if (!key) {
-    console.warn("PETERPAY_API_KEY is not set, using default")
-    return "pk_e0bc3294452ecd11c0343b3f"
+    console.warn("PETERPAY_API_KEY is not set")
   }
-  return key
+  return key || ""
+}
+
+function getSecretKey(): string {
+  const key = process.env.PETERPAY_SECRET_KEY
+  if (!key) {
+    console.warn("PETERPAY_SECRET_KEY is not set")
+  }
+  return key || ""
+}
+
+function getHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "X-API-KEY": getApiKey(),
+    "X-SECRET-KEY": getSecretKey(),
+  }
 }
 
 export interface CreateOrderResponse {
@@ -55,10 +70,7 @@ export async function createOrder(
   try {
     const response = await fetch(`${PETERPAY_BASE}/create_order`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-KEY": getApiKey(),
-      },
+      headers: getHeaders(),
       body: JSON.stringify({
         amount,
         buyer_phone: buyerPhone,
@@ -96,12 +108,9 @@ export async function orderPay(
       body.network = network
     }
 
-    const response = await fetch(`${PETERPAY_BASE}/order_pay`, {
+    const response = await fetch(`${PETERPAY_BASE}/order_pay.php`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-KEY": getApiKey(),
-      },
+      headers: getHeaders(),
       body: JSON.stringify(body),
     })
 
@@ -123,10 +132,7 @@ export async function checkOrderStatus(
   try {
     const response = await fetch(`${PETERPAY_BASE}/order_status`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-KEY": getApiKey(),
-      },
+      headers: getHeaders(),
       body: JSON.stringify({
         order_id: orderId,
       }),

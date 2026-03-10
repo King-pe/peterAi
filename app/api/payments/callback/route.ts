@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import crypto from 'crypto'
 
 // Create admin client for webhook (no user context)
 const supabase = createClient(
@@ -7,93 +8,140 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+// Verify PeterPay webhook signature
+function verifySignature(payload: string, signature: string): boolean {
+  const secret = process.env.PETERPAY_SECRET_KEY
+  if (!secret) {
+    // Skip verification if no secret configured
+    return true
+  }
+  
+  try {
+    const calculated = crypto
+      .createHmac('sha256', secret)
+      .update(payload)
+      .digest('hex')
+    
+    return crypto.timingSafeEqual(
+      Buffer.from(calculated),
+      Buffer.from(signature)
+    )
+  } catch {
+    return false
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    const rawBody = await request.text()
+    const signature = request.headers.get('X-PeterPay-Signature') || ''
     
+    // Verify signature
+    if (!verifySignature(rawBody, signature)) {
+      console.error('[v0] Invalid webhook signature')
+      return NextResponse.json(
+        { success: false, error: 'Invalid signature' },
+        { status: 401 }
+      )
+    }
+    
+    const body = JSON.parse(rawBody)
+    
+    // PeterPay webhook format
     const {
+      event,
       order_id,
-      status,
-      reference,
       amount,
-      phone,
+      currency,
+      status,
+      customer_phone,
+      timestamp,
     } = body
 
-    if (!order_id || !status) {
+    console.log('[v0] PeterPay Webhook received:', { event, order_id, status, amount })
+
+    if (!order_id) {
       return NextResponse.json(
-        { success: false, error: 'Missing required fields' },
+        { success: false, error: 'Missing order_id' },
         { status: 400 }
       )
+    }
+
+    // Determine payment status from event or status field
+    let paymentStatus = 'PENDING'
+    if (event === 'payment.completed' || status === 'COMPLETED') {
+      paymentStatus = 'COMPLETED'
+    } else if (event === 'payment.failed' || status === 'FAILED') {
+      paymentStatus = 'FAILED'
     }
 
     // Update payment status
     const { data: payment, error: paymentError } = await supabase
       .from('payments')
       .update({
-        status: status === 'SUCCESS' ? 'COMPLETED' : status === 'FAILED' ? 'FAILED' : 'PENDING',
-        reference: reference || null,
-        completed_at: status === 'SUCCESS' ? new Date().toISOString() : null,
+        status: paymentStatus,
+        completed_at: paymentStatus === 'COMPLETED' ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
       })
       .eq('order_id', order_id)
       .select()
       .single()
 
     if (paymentError) {
-      console.error('Payment update error:', paymentError)
-      return NextResponse.json(
-        { success: false, error: 'Payment not found' },
-        { status: 404 }
-      )
+      console.error('[v0] Payment update error:', paymentError)
+      // Payment might not exist in our DB yet, that's okay
+      return NextResponse.json({ success: true, message: 'Webhook received' })
     }
 
     // If payment successful, add credits to user
-    if (status === 'SUCCESS' && payment) {
-      const creditsToAdd = payment.credits_added || calculateCredits(Number(amount))
+    if (paymentStatus === 'COMPLETED' && payment) {
+      const phone = customer_phone || payment.phone
+      const creditsToAdd = payment.credits_added || calculateCredits(Number(amount || payment.amount))
 
-      // Update bot_user credits
-      const { error: userError } = await supabase
+      console.log('[v0] Adding credits:', { phone, creditsToAdd })
+
+      // Get current bot_user
+      const { data: botUser, error: userFetchError } = await supabase
         .from('bot_users')
-        .update({
-          credits: supabase.rpc('increment_credits', { 
-            user_phone: phone, 
-            credits_to_add: creditsToAdd 
-          }),
-        })
+        .select('id, credits, total_spent')
         .eq('phone', phone)
+        .single()
 
-      if (userError) {
-        // Try direct update
-        const { data: botUser } = await supabase
+      if (botUser && !userFetchError) {
+        // Update credits and total_spent
+        const { error: updateError } = await supabase
           .from('bot_users')
-          .select('credits')
-          .eq('phone', phone)
-          .single()
+          .update({ 
+            credits: (botUser.credits || 0) + creditsToAdd,
+            total_spent: Number(botUser.total_spent || 0) + Number(amount || payment.amount),
+            last_active: new Date().toISOString(),
+          })
+          .eq('id', botUser.id)
 
-        if (botUser) {
-          await supabase
-            .from('bot_users')
-            .update({ 
-              credits: (botUser.credits || 0) + creditsToAdd,
-              total_spent: supabase.sql`total_spent + ${Number(amount)}`
-            })
-            .eq('phone', phone)
+        if (updateError) {
+          console.error('[v0] Error updating user credits:', updateError)
+        } else {
+          console.log('[v0] Credits updated successfully for:', phone)
         }
-      }
 
-      // Log the transaction
-      await supabase.from('logs').insert({
-        id: `payment-${order_id}-${Date.now()}`,
-        phone,
-        type: 'payment',
-        command: 'payment_callback',
-        message: `Payment completed: TZS ${amount}`,
-        response: `Credits added: ${creditsToAdd}`,
-      })
+        // Log the transaction
+        await supabase.from('logs').insert({
+          id: `payment-${order_id}-${Date.now()}`,
+          phone,
+          type: 'payment',
+          command: 'payment_callback',
+          message: `Payment completed: ${currency || 'TZS'} ${amount || payment.amount}`,
+          response: `Credits added: ${creditsToAdd}`,
+          bot_user_id: botUser.id,
+        })
+      } else {
+        console.error('[v0] Bot user not found for phone:', phone)
+      }
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Callback error:', error)
+    console.error('[v0] Callback error:', error)
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }

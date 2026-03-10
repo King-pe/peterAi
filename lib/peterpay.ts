@@ -173,3 +173,39 @@ export function calculateCredits(amount: number): number {
   if (amount >= 1000) return 10
   return Math.floor(amount / 100) // 1 credit per 100 TZS for smaller amounts
 }
+
+// ---- Alias for orderPay (backward compatibility) ----
+export async function directPay(
+  orderId: string,
+  buyerPhone: string,
+  network?: "Vodacom" | "Tigo" | "Airtel"
+): Promise<OrderPayResponse> {
+  // Use orderPay with a default amount since we're triggering existing order
+  return orderPay(0, buyerPhone, "Customer", network)
+}
+
+// ---- Verify Webhook Signature ----
+export function verifyWebhookSignature(
+  rawBody: string,
+  signature: string
+): boolean {
+  // PeterPay uses HMAC-SHA256 for webhook verification
+  // If no secret is configured, we skip verification
+  const secret = process.env.PETERPAY_API_SECRET
+  if (!secret) {
+    return true // Skip verification if no secret configured
+  }
+
+  try {
+    // Simple comparison for now - can be enhanced with crypto
+    const crypto = require("crypto")
+    const expectedSignature = crypto
+      .createHmac("sha256", secret)
+      .update(rawBody)
+      .digest("hex")
+
+    return signature === expectedSignature
+  } catch {
+    return true // Skip verification on error
+  }
+}

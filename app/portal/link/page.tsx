@@ -41,24 +41,26 @@ export default function LinkPhonePage() {
     }
   }, [])
 
-  // Poll for connection status
+  // Poll for connection status - faster polling for immediate feedback
   useEffect(() => {
     if (linkMethod === 'qr' && !connected) {
       fetchQrCode()
       
+      // Poll every 2 seconds for faster connection detection
       const interval = setInterval(async () => {
         try {
           const res = await fetch('/api/whatsapp/status')
           const data = await res.json()
           if (data.connected) {
             setConnected(true)
-            toast.success('WhatsApp imeunganishwa vizuri!')
+            setQrCode(null) // Clear QR code
+            toast.success('WhatsApp imeunganishwa vizuri! Angalia inbox yako.')
             clearInterval(interval)
           }
         } catch {
           // Silent fail
         }
-      }, 5000)
+      }, 2000) // Poll every 2 seconds
 
       return () => clearInterval(interval)
     }
@@ -142,12 +144,15 @@ export default function LinkPhonePage() {
 
         <Card className="max-w-md">
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <div className="rounded-full bg-green-100 p-4 mb-4">
+            <div className="rounded-full bg-green-100 p-4 mb-4 animate-pulse">
               <CheckCircle className="size-12 text-green-600" />
             </div>
             <h3 className="text-xl font-semibold mb-2">Imeunganishwa!</h3>
-            <p className="text-muted-foreground text-center mb-6">
-              WhatsApp yako imeunganishwa na akaunti hii. Sasa unaweza kutumia bot na kuona mazungumzo yako.
+            <p className="text-muted-foreground text-center mb-4">
+              WhatsApp yako imeunganishwa na akaunti hii.
+            </p>
+            <p className="text-sm text-green-600 text-center mb-6 font-medium">
+              Angalia WhatsApp yako - umepokea ujumbe wa kukaribisha kutoka PeterAi Bot!
             </p>
             <Button onClick={() => router.push('/portal')}>
               Rudi kwenye Dashboard

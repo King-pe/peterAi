@@ -75,18 +75,19 @@ export async function initializeConnection(usePairingCode = false): Promise<WASo
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut
+        // Only stop reconnecting if user explicitly logged out (statusCode 401)
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut
 
         connectionStatus.connected = false
-        console.log('[v0] Connection closed, statusCode:', statusCode, 'shouldReconnect:', shouldReconnect)
+        console.log('[v0] Connection closed, statusCode:', statusCode, 'isLoggedOut:', isLoggedOut)
 
-        if (shouldReconnect) {
-          // Retry connection after delay - keep trying to maintain connection
-          console.log('[v0] Reconnecting in 3 seconds...')
-          setTimeout(() => initializeConnection(), 3000)
+        if (!isLoggedOut) {
+          // Always try to reconnect unless explicitly logged out
+          console.log('[v0] Reconnecting in 2 seconds...')
+          setTimeout(() => initializeConnection(), 2000)
         } else {
           // Only clear auth data if explicitly logged out by user
-          console.log('[v0] Logged out - clearing auth data')
+          console.log('[v0] Logged out by user - clearing auth data')
           qrCode = null
           connectionStatus.phoneNumber = null
           pairingCodeRequested = false

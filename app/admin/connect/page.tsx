@@ -19,17 +19,24 @@ export default function ConnectPage() {
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // Fetch connection status
+  // Fetch connection status - poll every 2 seconds for faster detection
   const { data: status, isLoading: statusLoading } = useSWR('/api/whatsapp/status', fetcher, {
-    refreshInterval: 5000,
+    refreshInterval: 2000,
   })
 
   // Fetch QR code
   const { data: qrData, isLoading: qrLoading } = useSWR(
     method === 'qr' && !status?.connected ? '/api/whatsapp/qr' : null,
     fetcher,
-    { refreshInterval: 20000 }
+    { refreshInterval: 15000 }
   )
+
+  // Show toast when connected
+  useEffect(() => {
+    if (status?.connected) {
+      toast.success('WhatsApp imeunganishwa! Angalia inbox yako kwa ujumbe wa kukaribisha.')
+    }
+  }, [status?.connected])
 
   const handlePhoneConnect = async (e: React.FormEvent) => {
     e.preventDefault()

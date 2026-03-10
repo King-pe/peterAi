@@ -74,17 +74,19 @@ export async function initializeConnection(usePairingCode = false): Promise<WASo
       }
 
       if (connection === 'close') {
-        const shouldReconnect =
-          (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut
+        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut
 
         connectionStatus.connected = false
-        console.log('[v0] Connection closed, shouldReconnect:', shouldReconnect)
+        console.log('[v0] Connection closed, statusCode:', statusCode, 'shouldReconnect:', shouldReconnect)
 
         if (shouldReconnect) {
-          // Retry connection after delay
-          setTimeout(() => initializeConnection(), 5000)
+          // Retry connection after delay - keep trying to maintain connection
+          console.log('[v0] Reconnecting in 3 seconds...')
+          setTimeout(() => initializeConnection(), 3000)
         } else {
-          // Clear auth data if logged out
+          // Only clear auth data if explicitly logged out by user
+          console.log('[v0] Logged out - clearing auth data')
           qrCode = null
           connectionStatus.phoneNumber = null
           pairingCodeRequested = false
@@ -99,6 +101,31 @@ export async function initializeConnection(usePairingCode = false): Promise<WASo
         // Setup message handler when connected
         if (socket) {
           setupMessageHandler(socket)
+          
+          // Send welcome message to the connected phone
+          const phoneNumber = connectionStatus.phoneNumber
+          if (phoneNumber) {
+            const welcomeMessage = `🎉 *PeterAi Bot Imeunganishwa!*
+
+Hongera! WhatsApp yako imeunganishwa na PeterAi Bot.
+
+*Maelezo:*
+- Nambari: ${phoneNumber}
+- Hali: Imeunganishwa
+- Wakati: ${new Date().toLocaleString('sw-TZ')}
+
+Bot yako sasa iko tayari kupokea na kujibu ujumbe.
+
+Tuma "msaada" kuona amri zote zinazopatikana.`
+
+            try {
+              const jid = `${phoneNumber}@s.whatsapp.net`
+              await socket.sendMessage(jid, { text: welcomeMessage })
+              console.log('[v0] Welcome message sent to:', phoneNumber)
+            } catch (err) {
+              console.error('[v0] Error sending welcome message:', err)
+            }
+          }
         }
       }
     })
@@ -201,6 +228,31 @@ export async function requestPairingCode(phoneNumber: string): Promise<string | 
         
         if (socket) {
           setupMessageHandler(socket)
+          
+          // Send welcome message
+          const phoneNumber = connectionStatus.phoneNumber
+          if (phoneNumber) {
+            const welcomeMessage = `🎉 *PeterAi Bot Imeunganishwa!*
+
+Hongera! WhatsApp yako imeunganishwa na PeterAi Bot kupitia pairing code.
+
+*Maelezo:*
+- Nambari: ${phoneNumber}
+- Hali: Imeunganishwa
+- Wakati: ${new Date().toLocaleString('sw-TZ')}
+
+Bot yako sasa iko tayari kupokea na kujibu ujumbe.
+
+Tuma "msaada" kuona amri zote zinazopatikana.`
+
+            try {
+              const jid = `${phoneNumber}@s.whatsapp.net`
+              await socket.sendMessage(jid, { text: welcomeMessage })
+              console.log('[v0] Welcome message sent via pairing:', phoneNumber)
+            } catch (err) {
+              console.error('[v0] Error sending welcome message:', err)
+            }
+          }
         }
       }
     })

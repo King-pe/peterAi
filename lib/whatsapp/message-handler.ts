@@ -38,7 +38,7 @@ Andika tu swali lako au ujumbe wowote na AI itakujibu!
 Kila jibu la AI hutumia credit 1.
 Unapata credit 5 za bure unapoanza.
 
-Kwa msaada zaidi wasiliana na: support@peterai.co.tz`
+Kwa msaada zaidi tuma ujumbe hapa.`
     },
   },
   {
@@ -74,13 +74,9 @@ ${!user.subscription_active && user.credits < 3 ? '⚠️ Credit zako zinakaribi
 • 100 Credit = TZS 6,000
 
 *Jinsi ya Kulipa:*
-1. M-Pesa: Lipa Bill Namba *123456*
-2. Tigo Pesa: *150*00*123456#
-3. Airtel Money: *150*00*123456#
+Jibu na kiasi unachotaka kulipa, mfano: *lipa 1000*
 
-Baada ya kulipa, credit zitaongezwa moja kwa moja.
-
-Au nenda: https://peterai.co.tz/lipa`
+Malipo yatatumwa kupitia M-Pesa/Tigo Pesa/Airtel Money moja kwa moja kwenye simu yako.`
     },
   },
   {
@@ -103,7 +99,7 @@ Au nenda: https://peterai.co.tz/lipa`
 • Msaada wa haraka
 • Vipengele vya ziada
 
-Nenda: https://peterai.co.tz/usajili`
+Jibu na *usajili basic* au *usajili premium* kuchagua mpango wako.`
     },
   },
   {

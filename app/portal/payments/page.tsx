@@ -80,7 +80,7 @@ export default async function PortalPaymentsPage() {
             <p className="text-sm text-muted-foreground">Ongeza credit zako za mazungumzo na AI</p>
           </div>
           <Button asChild>
-            <Link href="https://peterai.co.tz/lipa" target="_blank">
+            <Link href="/portal/buy-credits">
               Nunua Sasa
               <ExternalLink className="ml-2 size-4" />
             </Link>

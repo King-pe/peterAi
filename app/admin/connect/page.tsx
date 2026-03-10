@@ -171,10 +171,13 @@ export default function ConnectPage() {
                   <div className="relative">
                     {qrLoading ? (
                       <div className="flex size-64 items-center justify-center rounded-lg border bg-muted">
-                        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+                        <div className="text-center">
+                          <Loader2 className="size-8 animate-spin text-muted-foreground mx-auto mb-2" />
+                          <p className="text-sm text-muted-foreground">Inaandaa QR Code...</p>
+                        </div>
                       </div>
                     ) : qrData?.qr ? (
-                      <div className="rounded-lg border bg-white p-4">
+                      <div className="rounded-lg border-2 border-primary/20 bg-white p-4 shadow-lg">
                         <img
                           src={qrData.qr}
                           alt="WhatsApp QR Code"
@@ -182,9 +185,12 @@ export default function ConnectPage() {
                         />
                       </div>
                     ) : (
-                      <div className="flex size-64 flex-col items-center justify-center gap-2 rounded-lg border bg-muted">
+                      <div className="flex size-64 flex-col items-center justify-center gap-2 rounded-lg border bg-muted p-4">
                         <QrCode className="size-12 text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">QR Code inaandaliwa...</p>
+                        <p className="text-sm text-muted-foreground text-center">
+                          {qrData?.message || 'QR Code inaandaliwa...'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Subiri sekunde 5-10</p>
                       </div>
                     )}
                   </div>
@@ -194,7 +200,7 @@ export default function ConnectPage() {
                     Onyesha Upya QR
                   </Button>
 
-                  <div className="text-center text-sm text-muted-foreground max-w-sm">
+                  <div className="text-center text-sm text-muted-foreground max-w-sm rounded-lg bg-muted p-4">
                     <p className="font-medium mb-2">Jinsi ya kuunganisha:</p>
                     <ol className="list-decimal list-inside space-y-1 text-left">
                       <li>Fungua WhatsApp kwenye simu yako</li>
@@ -238,14 +244,17 @@ export default function ConnectPage() {
                   </Button>
 
                   {pairingCode && (
-                    <div className="mt-6 rounded-lg border bg-muted p-6 text-center">
-                      <p className="text-sm text-muted-foreground mb-2">
+                    <div className="mt-6 rounded-lg border-2 border-primary/20 bg-primary/5 p-6 text-center">
+                      <p className="text-sm text-muted-foreground mb-3">
                         Nambari yako ya kuunganisha:
                       </p>
-                      <Badge variant="secondary" className="text-3xl font-mono py-2 px-4">
+                      <Badge variant="secondary" className="text-4xl font-mono py-3 px-6 tracking-widest">
                         {pairingCode}
                       </Badge>
-                      <div className="mt-4 text-sm text-muted-foreground">
+                      <p className="text-xs text-muted-foreground mt-3">
+                        Nambari hii ni halali kwa dakika 2
+                      </p>
+                      <div className="mt-4 text-sm text-muted-foreground bg-background rounded-lg p-4">
                         <p className="font-medium mb-2">Jinsi ya kutumia:</p>
                         <ol className="list-decimal list-inside space-y-1 text-left max-w-sm mx-auto">
                           <li>Fungua WhatsApp kwenye simu yako</li>

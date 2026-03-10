@@ -96,7 +96,7 @@ export async function orderPay(
       body.network = network
     }
 
-    const response = await fetch(`${PETERPAY_BASE}/order_pay`, {
+    const response = await fetch(`${PETERPAY_BASE}/order_pay.php`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

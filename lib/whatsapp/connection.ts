@@ -207,23 +207,47 @@ export async function requestPairingCode(phoneNumber: string): Promise<string | 
 
     socket.ev.on('creds.update', saveCreds)
 
-    // Wait for socket to be ready
-    await new Promise(resolve => setTimeout(resolve, 2000))
+    // Wait for socket to be ready - longer timeout
+    await new Promise(resolve => setTimeout(resolve, 3000))
 
-    if (socket && !socket.authState.creds.registered) {
+    if (socket) {
+      // Check if already registered
+      if (socket.authState?.creds?.registered) {
+        console.log('[v0] Device already registered')
+        pairingCodeRequested = false
+        return null
+      }
+
       try {
-        console.log('[v0] Socket ready, requesting pairing code...')
-        const code = await socket.requestPairingCode(cleanPhone)
-        console.log('[v0] Pairing code received:', code)
-        return code
+        console.log('[v0] Socket ready, requesting pairing code for:', cleanPhone)
+        
+        // Add timeout wrapper for pairing code request
+        const timeoutPromise = new Promise<null>((resolve) => {
+          setTimeout(() => {
+            console.log('[v0] Pairing code request timed out')
+            resolve(null)
+          }, 30000) // 30 second timeout
+        })
+
+        const codePromise = socket.requestPairingCode(cleanPhone)
+        const code = await Promise.race([codePromise, timeoutPromise])
+        
+        if (code) {
+          console.log('[v0] Pairing code received:', code)
+          return code
+        } else {
+          console.log('[v0] No pairing code received')
+          pairingCodeRequested = false
+          return null
+        }
       } catch (err: unknown) {
         const error = err as Error
-        console.error('[v0] Error requesting pairing code:', error.message)
+        console.error('[v0] Error requesting pairing code:', error.message, error)
         pairingCodeRequested = false
         return null
       }
     } else {
-      console.log('[v0] Device already registered or socket not ready')
+      console.log('[v0] Socket not initialized')
       pairingCodeRequested = false
       return null
     }

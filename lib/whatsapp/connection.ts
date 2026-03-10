@@ -17,7 +17,9 @@ const logger = pino({ level: 'silent' })
 // Store connection state
 let socket: WASocket | null = null
 let qrCode: string | null = null
+let qrCodeRaw: string | null = null
 let pairingCodeRequested = false
+let isInitializing = false
 let connectionStatus = {
   connected: false,
   phoneNumber: null as string | null,
@@ -31,13 +33,31 @@ if (!fs.existsSync(AUTH_FOLDER)) {
 }
 
 export async function initializeConnection(usePairingCode = false): Promise<WASocket | null> {
+  // Prevent multiple simultaneous initializations
+  if (isInitializing) {
+    return socket
+  }
+
   if (socket && connectionStatus.connected) {
     return socket
   }
 
+  isInitializing = true
+
   try {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER)
     const { version } = await fetchLatestBaileysVersion()
+
+    // Close existing socket if any
+    if (socket) {
+      try {
+        socket.ev.removeAllListeners('connection.update')
+        socket.ev.removeAllListeners('creds.update')
+        socket.ev.removeAllListeners('messages.upsert')
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
 
     socket = makeWASocket({
       version,
@@ -48,47 +68,60 @@ export async function initializeConnection(usePairingCode = false): Promise<WASo
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       generateHighQualityLinkPreview: true,
-      // Browser identification
       browser: ['PeterAi Bot', 'Chrome', '120.0.0'],
+      // Keep connection alive
+      keepAliveIntervalMs: 30000,
+      // Connection timeout
+      connectTimeoutMs: 60000,
+      // Default query timeout
+      defaultQueryTimeoutMs: 60000,
+      // Emit close when deleting closed connections
+      emitOwnEvents: true,
+      // Mark online
+      markOnlineOnConnect: true,
     })
 
     // Handle connection updates
     socket.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update
 
+      // Generate new QR code when received
       if (qr && !usePairingCode && !pairingCodeRequested) {
-        // Generate QR code as data URL
+        qrCodeRaw = qr
         try {
           qrCode = await QRCode.toDataURL(qr, {
-            width: 256,
+            width: 300,
             margin: 2,
             color: {
               dark: '#000000',
               light: '#ffffff',
             },
           })
-          console.log('[v0] QR Code generated successfully')
         } catch (err) {
-          console.error('[v0] Error generating QR code:', err)
+          console.error('Error generating QR code:', err)
         }
+      }
+
+      if (connection === 'connecting') {
+        connectionStatus.connected = false
       }
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
-        // Only stop reconnecting if user explicitly logged out (statusCode 401)
         const isLoggedOut = statusCode === DisconnectReason.loggedOut
 
         connectionStatus.connected = false
-        console.log('[v0] Connection closed, statusCode:', statusCode, 'isLoggedOut:', isLoggedOut)
+        isInitializing = false
 
         if (!isLoggedOut) {
-          // Always try to reconnect unless explicitly logged out
-          console.log('[v0] Reconnecting in 2 seconds...')
-          setTimeout(() => initializeConnection(), 2000)
-        } else {
-          // Only clear auth data if explicitly logged out by user
-          console.log('[v0] Logged out by user - clearing auth data')
+          // Reconnect after a short delay
           qrCode = null
+          qrCodeRaw = null
+          setTimeout(() => initializeConnection(), 3000)
+        } else {
+          // Clear everything if logged out
+          qrCode = null
+          qrCodeRaw = null
           connectionStatus.phoneNumber = null
           pairingCodeRequested = false
         }
@@ -96,8 +129,9 @@ export async function initializeConnection(usePairingCode = false): Promise<WASo
         connectionStatus.connected = true
         connectionStatus.phoneNumber = socket?.user?.id?.split(':')[0] || null
         qrCode = null
+        qrCodeRaw = null
         pairingCodeRequested = false
-        console.log('[v0] WhatsApp connected successfully:', connectionStatus.phoneNumber)
+        isInitializing = false
         
         // Setup message handler when connected
         if (socket) {
@@ -106,14 +140,12 @@ export async function initializeConnection(usePairingCode = false): Promise<WASo
           // Send welcome message to the connected phone
           const phoneNumber = connectionStatus.phoneNumber
           if (phoneNumber) {
-            const welcomeMessage = `🎉 *PeterAi Bot Imeunganishwa!*
+            const welcomeMessage = `*PeterAi Bot Imeunganishwa!*
 
 Hongera! WhatsApp yako imeunganishwa na PeterAi Bot.
 
-*Maelezo:*
-- Nambari: ${phoneNumber}
-- Hali: Imeunganishwa
-- Wakati: ${new Date().toLocaleString('sw-TZ')}
+Nambari: ${phoneNumber}
+Wakati: ${new Date().toLocaleString('sw-TZ')}
 
 Bot yako sasa iko tayari kupokea na kujibu ujumbe.
 
@@ -122,32 +154,58 @@ Tuma "msaada" kuona amri zote zinazopatikana.`
             try {
               const jid = `${phoneNumber}@s.whatsapp.net`
               await socket.sendMessage(jid, { text: welcomeMessage })
-              console.log('[v0] Welcome message sent to:', phoneNumber)
             } catch (err) {
-              console.error('[v0] Error sending welcome message:', err)
+              console.error('Error sending welcome message:', err)
             }
           }
         }
       }
     })
 
-    // Save credentials on update
+    // Save credentials on update - IMPORTANT for persistent login
     socket.ev.on('creds.update', saveCreds)
 
+    isInitializing = false
     return socket
   } catch (error) {
-    console.error('[v0] Error initializing WhatsApp connection:', error)
+    console.error('Error initializing WhatsApp connection:', error)
+    isInitializing = false
     return null
   }
 }
 
 export async function getQRCode(): Promise<string | null> {
-  // If not initialized or no QR code, try to initialize
-  if (!socket && !qrCode) {
+  // If not initialized, start initialization
+  if (!socket && !isInitializing) {
     await initializeConnection(false)
-    // Wait a bit for QR to be generated
-    await new Promise(resolve => setTimeout(resolve, 2000))
   }
+  
+  // Wait a bit for QR to be generated if initializing
+  if (isInitializing && !qrCode) {
+    await new Promise(resolve => setTimeout(resolve, 3000))
+  }
+  
+  return qrCode
+}
+
+export async function refreshQRCode(): Promise<string | null> {
+  // Force new QR code by reinitializing
+  if (socket && !connectionStatus.connected) {
+    try {
+      socket.ev.removeAllListeners('connection.update')
+      socket.ev.removeAllListeners('creds.update')
+      socket = null
+    } catch {
+      // Ignore
+    }
+  }
+  
+  qrCode = null
+  qrCodeRaw = null
+  
+  await initializeConnection(false)
+  await new Promise(resolve => setTimeout(resolve, 3000))
+  
   return qrCode
 }
 
@@ -157,7 +215,7 @@ export async function getConnectionStatus() {
 
 export async function requestPairingCode(phoneNumber: string): Promise<string | null> {
   try {
-    // Clean phone number - ensure it starts with country code
+    // Clean phone number
     let cleanPhone = phoneNumber.replace(/\D/g, '')
     
     // Handle Tanzania numbers
@@ -168,32 +226,27 @@ export async function requestPairingCode(phoneNumber: string): Promise<string | 
     }
     
     if (!cleanPhone || cleanPhone.length < 12) {
-      console.error('[v0] Invalid phone number:', phoneNumber, '-> cleaned:', cleanPhone)
       return null
     }
 
-    console.log('[v0] Requesting pairing code for:', cleanPhone)
-
-    // If already connected, return null
     if (connectionStatus.connected) {
-      console.log('[v0] Already connected')
       return null
     }
 
-    // Reset connection to ensure fresh state for pairing
+    // Reset connection for pairing
     if (socket) {
       try {
         socket.ev.removeAllListeners('connection.update')
         socket.ev.removeAllListeners('creds.update')
         socket = null
-      } catch (e) {
-        console.log('[v0] Error cleaning up socket:', e)
+      } catch {
+        // Ignore
       }
     }
 
-    // Initialize fresh connection for pairing
     pairingCodeRequested = true
     qrCode = null
+    qrCodeRaw = null
     
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER)
     const { version } = await fetchLatestBaileysVersion()
@@ -207,9 +260,10 @@ export async function requestPairingCode(phoneNumber: string): Promise<string | 
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       browser: ['PeterAi Bot', 'Chrome', '120.0.0'],
+      keepAliveIntervalMs: 30000,
+      connectTimeoutMs: 60000,
     })
 
-    // Setup connection handler
     socket.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect } = update
 
@@ -225,33 +279,28 @@ export async function requestPairingCode(phoneNumber: string): Promise<string | 
         connectionStatus.connected = true
         connectionStatus.phoneNumber = socket?.user?.id?.split(':')[0] || null
         pairingCodeRequested = false
-        console.log('[v0] WhatsApp connected via pairing code:', connectionStatus.phoneNumber)
         
         if (socket) {
           setupMessageHandler(socket)
           
-          // Send welcome message
           const phoneNumber = connectionStatus.phoneNumber
           if (phoneNumber) {
-            const welcomeMessage = `🎉 *PeterAi Bot Imeunganishwa!*
+            const welcomeMessage = `*PeterAi Bot Imeunganishwa!*
 
-Hongera! WhatsApp yako imeunganishwa na PeterAi Bot kupitia pairing code.
+Hongera! WhatsApp yako imeunganishwa na PeterAi Bot.
 
-*Maelezo:*
-- Nambari: ${phoneNumber}
-- Hali: Imeunganishwa
-- Wakati: ${new Date().toLocaleString('sw-TZ')}
+Nambari: ${phoneNumber}
+Wakati: ${new Date().toLocaleString('sw-TZ')}
 
-Bot yako sasa iko tayari kupokea na kujibu ujumbe.
+Bot yako sasa iko tayari.
 
-Tuma "msaada" kuona amri zote zinazopatikana.`
+Tuma "msaada" kuona amri zote.`
 
             try {
               const jid = `${phoneNumber}@s.whatsapp.net`
               await socket.sendMessage(jid, { text: welcomeMessage })
-              console.log('[v0] Welcome message sent via pairing:', phoneNumber)
-            } catch (err) {
-              console.error('[v0] Error sending welcome message:', err)
+            } catch {
+              // Ignore send errors
             }
           }
         }
@@ -260,52 +309,22 @@ Tuma "msaada" kuona amri zote zinazopatikana.`
 
     socket.ev.on('creds.update', saveCreds)
 
-    // Wait for socket to be ready - longer timeout
-    await new Promise(resolve => setTimeout(resolve, 3000))
+    // Wait for socket to be ready
+    await new Promise(resolve => setTimeout(resolve, 4000))
 
-    if (socket) {
-      // Check if already registered
-      if (socket.authState?.creds?.registered) {
-        console.log('[v0] Device already registered')
-        pairingCodeRequested = false
-        return null
-      }
-
+    if (socket && !socket.authState?.creds?.registered) {
       try {
-        console.log('[v0] Socket ready, requesting pairing code for:', cleanPhone)
-        
-        // Add timeout wrapper for pairing code request
-        const timeoutPromise = new Promise<null>((resolve) => {
-          setTimeout(() => {
-            console.log('[v0] Pairing code request timed out')
-            resolve(null)
-          }, 30000) // 30 second timeout
-        })
-
-        const codePromise = socket.requestPairingCode(cleanPhone)
-        const code = await Promise.race([codePromise, timeoutPromise])
-        
-        if (code) {
-          console.log('[v0] Pairing code received:', code)
-          return code
-        } else {
-          console.log('[v0] No pairing code received')
-          pairingCodeRequested = false
-          return null
-        }
-      } catch (err: unknown) {
-        const error = err as Error
-        console.error('[v0] Error requesting pairing code:', error.message, error)
+        const code = await socket.requestPairingCode(cleanPhone)
+        return code
+      } catch {
         pairingCodeRequested = false
         return null
       }
-    } else {
-      console.log('[v0] Socket not initialized')
-      pairingCodeRequested = false
-      return null
     }
-  } catch (error) {
-    console.error('[v0] Error in requestPairingCode:', error)
+    
+    pairingCodeRequested = false
+    return null
+  } catch {
     pairingCodeRequested = false
     return null
   }
@@ -319,6 +338,7 @@ export async function disconnectWhatsApp(): Promise<boolean> {
       connectionStatus.connected = false
       connectionStatus.phoneNumber = null
       qrCode = null
+      qrCodeRaw = null
       pairingCodeRequested = false
 
       // Clear auth folder
@@ -327,12 +347,10 @@ export async function disconnectWhatsApp(): Promise<boolean> {
         fs.mkdirSync(AUTH_FOLDER, { recursive: true })
       }
 
-      console.log('[v0] WhatsApp disconnected successfully')
       return true
     }
     return false
-  } catch (error) {
-    console.error('[v0] Error disconnecting WhatsApp:', error)
+  } catch {
     return false
   }
 }
@@ -340,16 +358,13 @@ export async function disconnectWhatsApp(): Promise<boolean> {
 export async function sendMessage(to: string, message: string): Promise<boolean> {
   try {
     if (!socket || !connectionStatus.connected) {
-      console.error('[v0] Cannot send message: not connected')
       return false
     }
 
     const jid = to.includes('@s.whatsapp.net') ? to : `${to}@s.whatsapp.net`
     await socket.sendMessage(jid, { text: message })
-    console.log('[v0] Message sent to:', jid)
     return true
-  } catch (error) {
-    console.error('[v0] Error sending message:', error)
+  } catch {
     return false
   }
 }
@@ -358,11 +373,21 @@ export function getSocket(): WASocket | null {
   return socket
 }
 
-// Reset connection state
 export async function resetConnection(): Promise<void> {
+  if (socket) {
+    try {
+      socket.ev.removeAllListeners('connection.update')
+      socket.ev.removeAllListeners('creds.update')
+    } catch {
+      // Ignore
+    }
+  }
+  
   socket = null
   qrCode = null
+  qrCodeRaw = null
   pairingCodeRequested = false
+  isInitializing = false
   connectionStatus.connected = false
   connectionStatus.phoneNumber = null
 
@@ -371,6 +396,4 @@ export async function resetConnection(): Promise<void> {
     fs.rmSync(AUTH_FOLDER, { recursive: true, force: true })
     fs.mkdirSync(AUTH_FOLDER, { recursive: true })
   }
-  
-  console.log('[v0] Connection reset')
 }

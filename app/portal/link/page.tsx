@@ -22,10 +22,12 @@ export default function LinkPhonePage() {
   const router = useRouter()
 
   // Fetch QR code
-  const fetchQrCode = useCallback(async () => {
+  const fetchQrCode = useCallback(async (refresh = false) => {
     setQrLoading(true)
+    setQrCode(null)
     try {
-      const res = await fetch('/api/whatsapp/qr')
+      const url = refresh ? '/api/whatsapp/qr?refresh=true' : '/api/whatsapp/qr'
+      const res = await fetch(url)
       const data = await res.json()
       
       if (data.connected) {
@@ -33,6 +35,9 @@ export default function LinkPhonePage() {
         toast.success('WhatsApp tayari imeunganishwa!')
       } else if (data.qr) {
         setQrCode(data.qr)
+      } else {
+        // Wait and try again if no QR yet
+        setTimeout(() => fetchQrCode(true), 3000)
       }
     } catch {
       toast.error('Imeshindikana kupata QR code')
@@ -225,10 +230,14 @@ export default function LinkPhonePage() {
                   )}
                 </div>
 
-                <Button variant="outline" onClick={fetchQrCode} disabled={qrLoading}>
+                <Button variant="outline" onClick={() => fetchQrCode(true)} disabled={qrLoading}>
                   <RefreshCw className={`size-4 ${qrLoading ? 'animate-spin' : ''}`} />
                   Onyesha Upya QR
                 </Button>
+                
+                <p className="text-xs text-amber-600 text-center max-w-xs">
+                  QR code inaisha haraka. Kama scan haifanyi kazi, bonyeza "Onyesha Upya QR" kupata code mpya.
+                </p>
 
                 <div className="text-center text-sm text-muted-foreground max-w-sm rounded-lg bg-muted p-4">
                   <p className="font-medium mb-2">Jinsi ya kuunganisha:</p>

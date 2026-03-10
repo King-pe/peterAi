@@ -19,17 +19,24 @@ export default function ConnectPage() {
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // Fetch connection status
+  // Fetch connection status - poll every 2 seconds for faster detection
   const { data: status, isLoading: statusLoading } = useSWR('/api/whatsapp/status', fetcher, {
-    refreshInterval: 5000,
+    refreshInterval: 2000,
   })
 
   // Fetch QR code
   const { data: qrData, isLoading: qrLoading } = useSWR(
     method === 'qr' && !status?.connected ? '/api/whatsapp/qr' : null,
     fetcher,
-    { refreshInterval: 20000 }
+    { refreshInterval: 15000 }
   )
+
+  // Show toast when connected
+  useEffect(() => {
+    if (status?.connected) {
+      toast.success('WhatsApp imeunganishwa! Angalia inbox yako kwa ujumbe wa kukaribisha.')
+    }
+  }, [status?.connected])
 
   const handlePhoneConnect = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -83,9 +90,10 @@ export default function ConnectPage() {
     }
   }
 
-  const handleRefreshQR = () => {
-    mutate('/api/whatsapp/qr')
+  const handleRefreshQR = async () => {
     toast.info('Inaonyesha upya QR code...')
+    await fetch('/api/whatsapp/qr?refresh=true')
+    mutate('/api/whatsapp/qr')
   }
 
   return (
@@ -199,6 +207,10 @@ export default function ConnectPage() {
                     <RefreshCw className={`size-4 ${qrLoading ? 'animate-spin' : ''}`} />
                     Onyesha Upya QR
                   </Button>
+                  
+                  <p className="text-xs text-amber-600 text-center max-w-xs">
+                    QR code inaisha haraka (~20 sekunde). Kama scan haifanyi kazi, bonyeza "Onyesha Upya QR" kupata code mpya.
+                  </p>
 
                   <div className="text-center text-sm text-muted-foreground max-w-sm rounded-lg bg-muted p-4">
                     <p className="font-medium mb-2">Jinsi ya kuunganisha:</p>

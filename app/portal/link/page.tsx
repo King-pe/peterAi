@@ -22,10 +22,12 @@ export default function LinkPhonePage() {
   const router = useRouter()
 
   // Fetch QR code
-  const fetchQrCode = useCallback(async () => {
+  const fetchQrCode = useCallback(async (refresh = false) => {
     setQrLoading(true)
+    setQrCode(null)
     try {
-      const res = await fetch('/api/whatsapp/qr')
+      const url = refresh ? '/api/whatsapp/qr?refresh=true' : '/api/whatsapp/qr'
+      const res = await fetch(url)
       const data = await res.json()
       
       if (data.connected) {
@@ -33,6 +35,9 @@ export default function LinkPhonePage() {
         toast.success('WhatsApp tayari imeunganishwa!')
       } else if (data.qr) {
         setQrCode(data.qr)
+      } else {
+        // Wait and try again if no QR yet
+        setTimeout(() => fetchQrCode(true), 3000)
       }
     } catch {
       toast.error('Imeshindikana kupata QR code')
@@ -41,24 +46,26 @@ export default function LinkPhonePage() {
     }
   }, [])
 
-  // Poll for connection status
+  // Poll for connection status - faster polling for immediate feedback
   useEffect(() => {
     if (linkMethod === 'qr' && !connected) {
       fetchQrCode()
       
+      // Poll every 2 seconds for faster connection detection
       const interval = setInterval(async () => {
         try {
           const res = await fetch('/api/whatsapp/status')
           const data = await res.json()
           if (data.connected) {
             setConnected(true)
-            toast.success('WhatsApp imeunganishwa vizuri!')
+            setQrCode(null) // Clear QR code
+            toast.success('WhatsApp imeunganishwa vizuri! Angalia inbox yako.')
             clearInterval(interval)
           }
         } catch {
           // Silent fail
         }
-      }, 5000)
+      }, 2000) // Poll every 2 seconds
 
       return () => clearInterval(interval)
     }
@@ -142,12 +149,15 @@ export default function LinkPhonePage() {
 
         <Card className="max-w-md">
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <div className="rounded-full bg-green-100 p-4 mb-4">
+            <div className="rounded-full bg-green-100 p-4 mb-4 animate-pulse">
               <CheckCircle className="size-12 text-green-600" />
             </div>
             <h3 className="text-xl font-semibold mb-2">Imeunganishwa!</h3>
-            <p className="text-muted-foreground text-center mb-6">
-              WhatsApp yako imeunganishwa na akaunti hii. Sasa unaweza kutumia bot na kuona mazungumzo yako.
+            <p className="text-muted-foreground text-center mb-4">
+              WhatsApp yako imeunganishwa na akaunti hii.
+            </p>
+            <p className="text-sm text-green-600 text-center mb-6 font-medium">
+              Angalia WhatsApp yako - umepokea ujumbe wa kukaribisha kutoka PeterAi Bot!
             </p>
             <Button onClick={() => router.push('/portal')}>
               Rudi kwenye Dashboard
@@ -220,10 +230,14 @@ export default function LinkPhonePage() {
                   )}
                 </div>
 
-                <Button variant="outline" onClick={fetchQrCode} disabled={qrLoading}>
+                <Button variant="outline" onClick={() => fetchQrCode(true)} disabled={qrLoading}>
                   <RefreshCw className={`size-4 ${qrLoading ? 'animate-spin' : ''}`} />
                   Onyesha Upya QR
                 </Button>
+                
+                <p className="text-xs text-amber-600 text-center max-w-xs">
+                  QR code inaisha haraka. Kama scan haifanyi kazi, bonyeza "Onyesha Upya QR" kupata code mpya.
+                </p>
 
                 <div className="text-center text-sm text-muted-foreground max-w-sm rounded-lg bg-muted p-4">
                   <p className="font-medium mb-2">Jinsi ya kuunganisha:</p>
